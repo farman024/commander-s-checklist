@@ -57,7 +57,7 @@ A high-stakes daily accountability PWA for traders and builders. Built with a te
 | Font | JetBrains Mono (Google Fonts) |
 | Storage | localStorage (Supabase-ready) |
 | Audio | Web Audio API |
-| Deployment | Netlify |
+| Deployment | GitHub Pages |
 | PWA | manifest.json + Service Worker |
 
 ---
