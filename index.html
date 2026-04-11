@@ -82,7 +82,7 @@
       setState: (data) => {
         try { localStorage.setItem("cdr_state", JSON.stringify(data)); } catch {}
       },
-      defaultState: () => ({ streak: 0, lastSubmitDate: null, logs: [] }),
+      defaultState: () => ({ streak: 0, lastSubmitDate: null, logs: [], name: null, codename: null }),
     };
 
     // ============================================================
@@ -408,7 +408,7 @@
       );
     }
 
-    function ChecklistForm({ state, onSubmit }) {
+    function ChecklistForm({ state, name, codename, onSubmit }) {
       const [energy, setEnergy] = useState(false);
       const [alterEgo, setAlterEgo] = useState(false);
       const [improvement, setImprovement] = useState("");
@@ -421,6 +421,7 @@
       return (
         <div>
           <div style={{ textAlign:"center", padding:"20px 0 24px", borderBottom:"1px solid #0d0d0d", marginBottom:"24px" }}>
+            <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.15em", marginBottom:"2px" }}>// COMMANDER: {codename.toUpperCase()}</div>
             <div style={{ fontSize:"11px", color:"#888", letterSpacing:"0.15em", marginBottom:"4px" }}>// DAYS OF DISCIPLINE</div>
             <div style={{ fontSize:"clamp(52px,13vw,76px)", color:"#00FF41", textShadow:"0 0 30px rgba(0,255,65,0.4)", lineHeight:"1" }}>
               {String(state.streak).padStart(3,"0")}
@@ -458,7 +459,7 @@
       );
     }
 
-    function AlreadyFiledScreen({ state }) {
+    function AlreadyFiledScreen({ state, name, codename }) {
       const [tab, setTab] = useState("home"); // home | stats | history
       const logs = state.logs || [];
 
@@ -527,7 +528,7 @@
             <div>
               <div style={{ border:"1px solid #001a00", padding:"14px 16px", marginBottom:"16px" }}>
                 <div style={{ fontSize:"11px", color:"#00FF4190", letterSpacing:"0.1em", lineHeight:"2" }}>
-                  // AUDIT LOGGED FOR TODAY<br/>{">"} Return tomorrow, Commander.
+                  // AUDIT LOGGED FOR TODAY<br/>{">"} Return tomorrow, {name}.
                 </div>
               </div>
               <QuoteBox text={getRandom(QUOTES.discipline)} variant="discipline" />
@@ -652,6 +653,99 @@
     }
 
     // ============================================================
+    // INIT SCREEN — First time setup
+    // ============================================================
+    function InitScreen({ onComplete }) {
+      const [name, setName] = useState("");
+      const [codename, setCodename] = useState("");
+      const [step, setStep] = useState(0); // 0=typing, 1=launching
+
+      const handleLaunch = () => {
+        if (!name.trim() || !codename.trim()) return;
+        setStep(1);
+        setTimeout(() => onComplete(name.trim(), codename.trim()), 2000);
+      };
+
+      const inputStyle = {
+        width:"100%", background:"#000",
+        border:"1px solid #1a1a1a", color:"#00FF41",
+        fontFamily:"'JetBrains Mono','Courier New',monospace",
+        fontSize:"13px", padding:"12px",
+        outline:"none", caretColor:"#00FF41",
+        letterSpacing:"0.05em", marginTop:"6px",
+        transition:"border-color 0.2s",
+      };
+
+      if (step === 1) {
+        return (
+          <div style={{ textAlign:"center", padding:"40px 0" }}>
+            <div className="flicker" style={{
+              fontSize:"14px", color:"#00FF41",
+              letterSpacing:"0.15em", lineHeight:"2.2",
+              textShadow:"0 0 10px rgba(0,255,65,0.6)",
+            }}>
+              {">"} IDENTITY CONFIRMED<br/>
+              {">"} INITIALIZING MISSION...<br/>
+              {">"} WELCOME, {codename.toUpperCase()}<br/>
+              {">"} SET SAIL. 🦅
+            </div>
+          </div>
+        );
+      }
+
+      return (
+        <div style={{ padding:"10px 0 30px" }}>
+          <div style={{ marginBottom:"28px" }}>
+            <div style={{ fontSize:"11px", color:"#00FF41", letterSpacing:"0.15em", marginBottom:"4px", textShadow:"0 0 8px rgba(0,255,65,0.5)" }}>
+              // SYSTEM INITIALIZATION
+            </div>
+            <div style={{ fontSize:"11px", color:"#555", letterSpacing:"0.08em", lineHeight:"1.8" }}>
+              {">"} First-time setup. This runs once.<br/>
+              {">"} Identity will be locked to this device.
+            </div>
+          </div>
+
+          {/* Name */}
+          <div style={{ marginBottom:"20px" }}>
+            <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.1em" }}>{">"} YOUR NAME:</div>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="> e.g. Farman"
+              maxLength={30}
+              onFocus={e => e.target.style.borderColor="#00FF41"}
+              onBlur={e => e.target.style.borderColor="#1a1a1a"}
+              style={inputStyle}
+            />
+          </div>
+
+          {/* Codename */}
+          <div style={{ marginBottom:"28px" }}>
+            <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.1em" }}>{">"} YOUR CODENAME:</div>
+            <input
+              type="text"
+              value={codename}
+              onChange={e => setCodename(e.target.value)}
+              placeholder="> e.g. Falcon"
+              maxLength={20}
+              onFocus={e => e.target.style.borderColor="#00FF41"}
+              onBlur={e => e.target.style.borderColor="#1a1a1a"}
+              style={inputStyle}
+            />
+            <div style={{ fontSize:"9px", color:"#333", marginTop:"6px", letterSpacing:"0.05em" }}>
+              {">"} This is your call sign. Choose wisely.
+            </div>
+          </div>
+
+          <Btn onClick={handleLaunch} disabled={!name.trim() || !codename.trim()}>
+            Initialize System — Set Sail 🦅
+          </Btn>
+        </div>
+      );
+    }
+
+    // ============================================================
     // MAIN APP
     // ============================================================
     function App() {
@@ -661,10 +755,17 @@
       useEffect(() => {
         const raw = MockDB.getState() || MockDB.defaultState();
         const t = today(), y = yesterday();
+        // First time — no name set
+        if (!raw.name) { setAppState(raw); setScreen("init"); return; }
         if (raw.lastSubmitDate === t) { setAppState(raw); setScreen("filed"); return; }
         if (raw.lastSubmitDate && raw.lastSubmitDate !== y && raw.lastSubmitDate !== t) { setAppState(raw); setScreen("breach"); return; }
         setAppState(raw); setScreen("checklist");
       }, []);
+
+      const handleInit = (name, codename) => {
+        const u = {...appState, name, codename};
+        MockDB.setState(u); setAppState(u); setScreen("checklist");
+      };
 
       const handleBreachResolve = (res) => {
         const u = {...appState};
@@ -680,11 +781,15 @@
         MockDB.setState(u); setAppState(u); setScreen("filed");
       };
 
+      const name = appState?.name || "Commander";
+      const codename = appState?.codename || "CDR";
+
       const renderScreen = () => {
         if (screen==="loading"||!appState) return <div style={{textAlign:"center",padding:"40px",fontSize:"11px",color:"#666"}}>{">"} INITIALIZING SYSTEM...</div>;
+        if (screen==="init") return <InitScreen onComplete={handleInit} />;
         if (screen==="breach") return <BreachScreen onResolve={handleBreachResolve} />;
-        if (screen==="checklist") return <ChecklistForm state={appState} onSubmit={handleSubmit} />;
-        if (screen==="filed") return <AlreadyFiledScreen state={appState} />;
+        if (screen==="checklist") return <ChecklistForm state={appState} name={name} codename={codename} onSubmit={handleSubmit} />;
+        if (screen==="filed") return <AlreadyFiledScreen state={appState} name={name} codename={codename} />;
       };
 
       const dateStr = new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).toUpperCase();
@@ -699,6 +804,7 @@
               <div style={{ marginBottom:"8px" }}>
                 <div style={{ fontSize:"10px", color:"#556", letterSpacing:"0.2em", marginBottom:"6px" }}>
                   {">"} FALCON'S HUNT — CLASSIFIED SYSTEM v1.0
+                  {appState?.codename ? ` — ${appState.codename.toUpperCase()}` : ""}
                 </div>
                 <GlitchHeader />
                 <div style={{ fontSize:"10px", color:"#556", letterSpacing:"0.1em", marginTop:"5px" }}>
@@ -716,8 +822,6 @@
               <div style={{ marginTop:"40px", borderTop:"1px solid #0a0a0a", paddingTop:"16px", fontSize:"9px", color:"#444", letterSpacing:"0.1em", textAlign:"center" }}>
                 // OPERATIONAL SECURITY ENABLED — ALL LOGS ENCRYPTED LOCALLY
               </div>
-
-
             </div>
           </div>
         </>
