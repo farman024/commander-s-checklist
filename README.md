@@ -8,12 +8,6 @@ A high-stakes daily accountability PWA for traders and builders. Built with a te
 
 ---
 
-## Screenshots
-
-> Terminal aesthetic · Mobile-first · PWA installable
-
----
-
 ## Features
 
 ### 🎯 Daily Audit
