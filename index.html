@@ -459,18 +459,194 @@
     }
 
     function AlreadyFiledScreen({ state }) {
+      const [tab, setTab] = useState("home"); // home | stats | history
+      const logs = state.logs || [];
+
+      // ── Stats calculations ──────────────────────────────────────
+      const totalDays = logs.length;
+      const greenDays = logs.filter(l => !l.alterEgo).length;
+      const redDays = logs.filter(l => l.alterEgo).length;
+      const winRate = totalDays > 0 ? Math.round((greenDays / totalDays) * 100) : 0;
+
+      // Longest streak from logs
+      let longest = 0, current = 0;
+      [...logs].sort((a,b)=>a.date.localeCompare(b.date)).forEach(l => {
+        if (!l.alterEgo) { current++; longest = Math.max(longest, current); }
+        else current = 0;
+      });
+
+      // Last 7 days grid
+      const last7 = Array.from({length:7}, (_,i) => {
+        const d = new Date(); d.setDate(d.getDate() - (6-i));
+        const dateStr = d.toISOString().split("T")[0];
+        const log = logs.find(l => l.date === dateStr);
+        const dayName = d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase();
+        return { dateStr, log, dayName };
+      });
+
+      // Monthly heatmap — last 5 weeks (35 days)
+      const heatmapDays = Array.from({length:35}, (_,i) => {
+        const d = new Date(); d.setDate(d.getDate() - (34-i));
+        const dateStr = d.toISOString().split("T")[0];
+        const log = logs.find(l => l.date === dateStr);
+        return { dateStr, log };
+      });
+
+      const TabBtn = ({ id, label }) => (
+        <button onClick={() => setTab(id)} style={{
+          background: tab===id ? "#00FF4115" : "transparent",
+          border: `1px solid ${tab===id ? "#00FF41" : "#1a1a1a"}`,
+          color: tab===id ? "#00FF41" : "#555",
+          fontFamily:"'JetBrains Mono','Courier New',monospace",
+          fontSize:"10px", letterSpacing:"0.1em",
+          padding:"7px 14px", cursor:"pointer",
+          textTransform:"uppercase", flex:1,
+          transition:"all 0.2s",
+        }}>{label}</button>
+      );
+
       return (
-        <div style={{ textAlign:"center", padding:"20px 0" }}>
-          <div style={{ fontSize:"clamp(52px,13vw,76px)", color:"#00FF41", textShadow:"0 0 30px rgba(0,255,65,0.4)", lineHeight:"1", marginBottom:"8px" }}>
-            {String(state.streak).padStart(3,"0")}
-          </div>
-          <div style={{ fontSize:"11px", color:"#888", letterSpacing:"0.15em", marginBottom:"24px" }}>// DAYS OF DISCIPLINE</div>
-          <div style={{ border:"1px solid #001a00", padding:"14px 16px", marginBottom:"16px" }}>
-            <div style={{ fontSize:"11px", color:"#00FF4190", letterSpacing:"0.1em", lineHeight:"2" }}>
-              // AUDIT LOGGED FOR TODAY<br/>{">"} Return tomorrow, Commander.
+        <div style={{ padding:"20px 0" }}>
+          {/* Streak */}
+          <div style={{ textAlign:"center", marginBottom:"20px" }}>
+            <div style={{ fontSize:"clamp(52px,13vw,76px)", color:"#00FF41", textShadow:"0 0 30px rgba(0,255,65,0.4)", lineHeight:"1", marginBottom:"4px" }}>
+              {String(state.streak).padStart(3,"0")}
             </div>
+            <div style={{ fontSize:"11px", color:"#888", letterSpacing:"0.15em" }}>// DAYS OF DISCIPLINE</div>
           </div>
-          <QuoteBox text={getRandom(QUOTES.discipline)} variant="discipline" />
+
+          {/* Tabs */}
+          <div style={{ display:"flex", gap:"6px", marginBottom:"20px" }}>
+            <TabBtn id="home" label="Home" />
+            <TabBtn id="stats" label="Stats" />
+            <TabBtn id="history" label="History" />
+          </div>
+
+          {/* ── HOME TAB ── */}
+          {tab === "home" && (
+            <div>
+              <div style={{ border:"1px solid #001a00", padding:"14px 16px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#00FF4190", letterSpacing:"0.1em", lineHeight:"2" }}>
+                  // AUDIT LOGGED FOR TODAY<br/>{">"} Return tomorrow, Commander.
+                </div>
+              </div>
+              <QuoteBox text={getRandom(QUOTES.discipline)} variant="discipline" />
+
+              {/* 7-day grid */}
+              <div style={{ marginTop:"20px" }}>
+                <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"10px" }}>// LAST 7 DAYS</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"4px" }}>
+                  {last7.map(({dateStr, log, dayName}) => {
+                    const col = !log ? "#1a1a1a" : log.alterEgo ? "#FF000033" : "#00FF4133";
+                    const border = !log ? "#2a2a2a" : log.alterEgo ? "#FF0000" : "#00FF41";
+                    return (
+                      <div key={dateStr} style={{ textAlign:"center" }}>
+                        <div style={{ fontSize:"8px", color:"#444", marginBottom:"4px", letterSpacing:"0.05em" }}>{dayName}</div>
+                        <div style={{
+                          height:"32px", background:col,
+                          border:`1px solid ${border}`,
+                          boxShadow: log ? `0 0 6px ${border}44` : "none",
+                        }} />
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── STATS TAB ── */}
+          {tab === "stats" && (
+            <div>
+              <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"16px" }}>// COMMANDER STATS</div>
+
+              {/* Stat cards */}
+              {[
+                { label:"Total Days Filed", value: totalDays, color:"#00FF41" },
+                { label:"Green Days", value: greenDays, color:"#00FF41" },
+                { label:"Red Days", value: redDays, color:"#FF0000" },
+                { label:"Win Rate", value: `${winRate}%`, color: winRate >= 70 ? "#00FF41" : winRate >= 50 ? "#FFD700" : "#FF0000" },
+                { label:"Current Streak", value: state.streak, color:"#00FF41" },
+                { label:"Longest Streak", value: longest, color:"#FFD700" },
+              ].map(({label, value, color}) => (
+                <div key={label} style={{
+                  display:"flex", justifyContent:"space-between", alignItems:"center",
+                  padding:"12px 0", borderBottom:"1px solid #0d0d0d",
+                }}>
+                  <div style={{ fontSize:"11px", color:"#888", letterSpacing:"0.05em" }}>{label}</div>
+                  <div style={{ fontSize:"18px", color, fontWeight:700, textShadow:`0 0 8px ${color}44` }}>{value}</div>
+                </div>
+              ))}
+
+              {/* Heatmap */}
+              <div style={{ marginTop:"24px" }}>
+                <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"10px" }}>// 35-DAY HEATMAP</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"3px" }}>
+                  {heatmapDays.map(({dateStr, log}) => {
+                    const col = !log ? "#111" : log.alterEgo ? "#FF000044" : "#00FF4144";
+                    const border = !log ? "#1a1a1a" : log.alterEgo ? "#FF000088" : "#00FF4188";
+                    return (
+                      <div key={dateStr} title={dateStr} style={{
+                        height:"28px", background:col,
+                        border:`1px solid ${border}`,
+                        boxShadow: log ? `0 0 4px ${border}` : "none",
+                      }} />
+                    );
+                  })}
+                </div>
+                <div style={{ display:"flex", gap:"12px", marginTop:"8px", justifyContent:"flex-end" }}>
+                  <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+                    <div style={{ width:"10px", height:"10px", background:"#00FF4144", border:"1px solid #00FF4188" }} />
+                    <span style={{ fontSize:"9px", color:"#555" }}>Green</span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+                    <div style={{ width:"10px", height:"10px", background:"#FF000044", border:"1px solid #FF000088" }} />
+                    <span style={{ fontSize:"9px", color:"#555" }}>Red</span>
+                  </div>
+                  <div style={{ display:"flex", alignItems:"center", gap:"4px" }}>
+                    <div style={{ width:"10px", height:"10px", background:"#111", border:"1px solid #1a1a1a" }} />
+                    <span style={{ fontSize:"9px", color:"#555" }}>Missed</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* ── HISTORY TAB ── */}
+          {tab === "history" && (
+            <div>
+              <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"16px" }}>
+                // PAST 1% IMPROVEMENTS — {logs.length} ENTRIES
+              </div>
+              {logs.length === 0 ? (
+                <div style={{ fontSize:"11px", color:"#333", textAlign:"center", padding:"30px 0" }}>
+                  {">"} No entries yet, Commander.
+                </div>
+              ) : (
+                <div style={{ maxHeight:"400px", overflowY:"auto" }}>
+                  {[...logs].reverse().map((log, i) => (
+                    <div key={i} style={{
+                      borderLeft:`3px solid ${log.alterEgo ? "#FF0000" : "#00FF41"}`,
+                      padding:"12px 14px", marginBottom:"10px",
+                      background: log.alterEgo ? "#FF000008" : "#00FF4108",
+                      border:`1px solid ${log.alterEgo ? "#FF000022" : "#00FF4122"}`,
+                      borderLeft:`3px solid ${log.alterEgo ? "#FF0000" : "#00FF41"}`,
+                    }}>
+                      <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
+                        <div style={{ fontSize:"10px", color: log.alterEgo ? "#FF000088" : "#00FF4188", letterSpacing:"0.1em" }}>
+                          {log.alterEgo ? "// RED DAY" : "// GREEN DAY"}
+                        </div>
+                        <div style={{ fontSize:"9px", color:"#444" }}>{log.date}</div>
+                      </div>
+                      <div style={{ fontSize:"12px", color:"#bbb", lineHeight:"1.6" }}>
+                        {log.improvement}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       );
     }
@@ -552,17 +728,14 @@
   </script>
 
   <!-- Service Worker Registration -->
-<script>
-  if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-      navigator.serviceWorker.register('/commander-s-checklist/service-worker.js', {
-        scope: '/commander-s-checklist/'
-      })
-      .then(reg => console.log('SW Registered for Folder:', reg.scope))
-      .catch(err => console.log('SW Registration Failed:', err));
-    });
-  }
-</script>
-
+  <script>
+    if ('serviceWorker' in navigator) {
+      window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/service-worker.js')
+          .then(reg => console.log('[SW] Registered:', reg.scope))
+          .catch(err => console.log('[SW] Registration failed:', err));
+      });
+    }
+  </script>
 </body>
 </html>
