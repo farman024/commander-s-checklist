@@ -15,6 +15,7 @@
   <!-- Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;500;700&display=swap" rel="stylesheet" />
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <!-- React + Babel -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
@@ -72,17 +73,92 @@
     const { useState, useEffect, useRef } = React;
 
     // ============================================================
-    // MOCK DATA LAYER — swap for Supabase later
+    // SUPABASE SYNC LAYER
     // ============================================================
+    const SUPABASE_URL = 'https://rlatlwyksxakqgwmarvf.supabase.co';
+    const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InJsYXRsd3lrc3hha3Fnd21hcnZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzUwMDQyNDcsImV4cCI6MjA5MDU4MDI0N30.CbjYYe1Y9TIt6WEiAVfIBjxgf49fv5a8DpFu9L7Hz8o';
+    const DB_KEY       = 'commander_state';
+    const LS_KEY       = 'cdr_state';
+
+    let sb = null;
+    let syncReady = false;
+
+    function initSB() {
+      try { sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); syncReady = true; }
+      catch(e) { syncReady = false; }
+    }
+
+    function setSyncDot(status) {
+      const dot = document.getElementById('syncDot');
+      if (!dot) return;
+      const c = { syncing:'#ffa726', ok:'#00FF41', error:'#ff4444', offline:'#333' };
+      dot.style.background = c[status] || c.offline;
+      dot.title = status.toUpperCase();
+    }
+
     const MockDB = {
-      getState: () => {
-        try { const r = localStorage.getItem("cdr_state"); return r ? JSON.parse(r) : null; }
+      defaultState: () => ({ streak:0, lastSubmitDate:null, logs:[], name:null, codename:null }),
+
+      // Save to localStorage instantly, push to Supabase async
+      setState: (data) => {
+        try { localStorage.setItem(LS_KEY, JSON.stringify(data)); } catch {}
+        if (syncReady && sb) MockDB._push(data);
+      },
+
+      _push: async (data) => {
+        setSyncDot('syncing');
+        try {
+          const { error } = await sb.from('commander_sync').upsert(
+            { key: DB_KEY, data: JSON.stringify(data), updated_at: new Date().toISOString() },
+            { onConflict: 'key' }
+          );
+          if (error) throw error;
+          setSyncDot('ok');
+        } catch(e) {
+          console.warn('[Supabase] Push failed:', e.message);
+          setSyncDot('error');
+        }
+      },
+
+      // Load from Supabase first, fallback to localStorage
+      getState: async () => {
+        initSB();
+        if (syncReady && sb) {
+          setSyncDot('syncing');
+          try {
+            const { data, error } = await sb
+              .from('commander_sync')
+              .select('data')
+              .eq('key', DB_KEY)
+              .single();
+            if (error && error.code !== 'PGRST116') throw error;
+            if (data && data.data) {
+              const remote = JSON.parse(data.data);
+              // Keep remote in sync with localStorage too
+              try { localStorage.setItem(LS_KEY, JSON.stringify(remote)); } catch {}
+              setSyncDot('ok');
+              return remote;
+            }
+            // No remote data — push local up if exists
+            const local = MockDB._getLocal();
+            if (local) MockDB._push(local);
+            setSyncDot('ok');
+            return local;
+          } catch(e) {
+            console.warn('[Supabase] Load failed, using local:', e.message);
+            setSyncDot('error');
+            return MockDB._getLocal();
+          }
+        } else {
+          setSyncDot('offline');
+          return MockDB._getLocal();
+        }
+      },
+
+      _getLocal: () => {
+        try { const r = localStorage.getItem(LS_KEY); return r ? JSON.parse(r) : null; }
         catch { return null; }
       },
-      setState: (data) => {
-        try { localStorage.setItem("cdr_state", JSON.stringify(data)); } catch {}
-      },
-      defaultState: () => ({ streak: 0, lastSubmitDate: null, logs: [], name: null, codename: null }),
     };
 
     // ============================================================
@@ -753,13 +829,15 @@
       const [screen, setScreen] = useState("loading");
 
       useEffect(() => {
-        const raw = MockDB.getState() || MockDB.defaultState();
-        const t = today(), y = yesterday();
-        // First time — no name set
-        if (!raw.name) { setAppState(raw); setScreen("init"); return; }
-        if (raw.lastSubmitDate === t) { setAppState(raw); setScreen("filed"); return; }
-        if (raw.lastSubmitDate && raw.lastSubmitDate !== y && raw.lastSubmitDate !== t) { setAppState(raw); setScreen("breach"); return; }
-        setAppState(raw); setScreen("checklist");
+        const init = async () => {
+          const raw = (await MockDB.getState()) || MockDB.defaultState();
+          const t = today(), y = yesterday();
+          if (!raw.name) { setAppState(raw); setScreen("init"); return; }
+          if (raw.lastSubmitDate === t) { setAppState(raw); setScreen("filed"); return; }
+          if (raw.lastSubmitDate && raw.lastSubmitDate !== y && raw.lastSubmitDate !== t) { setAppState(raw); setScreen("breach"); return; }
+          setAppState(raw); setScreen("checklist");
+        };
+        init();
       }, []);
 
       const handleInit = (name, codename) => {
@@ -802,9 +880,10 @@
 
               {/* Header */}
               <div style={{ marginBottom:"8px" }}>
-                <div style={{ fontSize:"10px", color:"#556", letterSpacing:"0.2em", marginBottom:"6px" }}>
+                <div style={{ fontSize:"10px", color:"#556", letterSpacing:"0.2em", marginBottom:"6px", display:"flex", alignItems:"center", gap:"8px" }}>
                   {">"} FALCON'S HUNT — CLASSIFIED SYSTEM v1.0
                   {appState?.codename ? ` — ${appState.codename.toUpperCase()}` : ""}
+                  <span id="syncDot" title="OFFLINE" style={{ width:"7px", height:"7px", borderRadius:"50%", background:"#333", display:"inline-block", flexShrink:0, transition:"background 0.4s" }} />
                 </div>
                 <GlitchHeader />
                 <div style={{ fontSize:"10px", color:"#556", letterSpacing:"0.1em", marginTop:"5px" }}>
@@ -835,7 +914,7 @@
   <script>
     if ('serviceWorker' in navigator) {
       window.addEventListener('load', () => {
-        navigator.serviceWorker.register('/service-worker.js')
+        navigator.serviceWorker.register('./service-worker.js')
           .then(reg => console.log('[SW] Registered:', reg.scope))
           .catch(err => console.log('[SW] Registration failed:', err));
       });
