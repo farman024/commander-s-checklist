@@ -41,6 +41,17 @@ A high-stakes daily accountability PWA for traders and builders. Built with a te
 - Personalized throughout the entire app
 - Stored locally — asks only once
 
+### 🎨 Theme Engine
+- 6 terminal themes: Cyber Green, Matrix Amber, Ice Blue, Phantom Purple, Ember Red, Stealth White
+- Theme selector in Settings tab — pick your aesthetic
+- Persists across sessions (localStorage)
+- Accent color updates across the entire UI instantly
+
+### 🏷️ Discipline Tags (Replaces Trading Tags)
+- `focus`, `grind`, `recovery`, `rest`, `break`, `other`
+- Tag your daily entry with what mode you're in
+- Selectable in the daily audit form
+
 ### 🔊 Sensory Feedback
 - Web Audio API success beep on green day completion
 - 2-second green pulse animation on mission accomplished
@@ -55,6 +66,7 @@ A high-stakes daily accountability PWA for traders and builders. Built with a te
 | Frontend | Vanilla HTML + React 18 (CDN) |
 | Styling | Inline styles + CSS animations |
 | Font | JetBrains Mono (Google Fonts) |
+| Theming | CSS custom properties + dynamic inline styles |
 | Storage | localStorage (Supabase-ready) |
 | Audio | Web Audio API |
 | Deployment | GitHub Pages |
@@ -73,7 +85,7 @@ On Android (Chrome/Brave):
 
 ## Data Structure
 
-All data stored locally under `cdr_state`:
+All data stored locally under `cdr_state` and theme under `cdr_theme`:
 
 ```json
 {
@@ -81,12 +93,14 @@ All data stored locally under `cdr_state`:
   "codename": "Falcon",
   "streak": 12,
   "lastSubmitDate": "2026-04-11",
+  "xp": 340,
   "logs": [
     {
       "date": "2026-04-11",
       "energy": true,
       "alterEgo": false,
-      "improvement": "Wake up 30 mins earlier tomorrow."
+      "improvement": "Wake up 30 mins earlier tomorrow.",
+      "tag": "focus"
     }
   ]
 }
@@ -115,6 +129,7 @@ open index.html
 - [ ] Weekly email summary
 - [ ] Streak milestones (Day 7, 30, 100)
 - [ ] Export logs as CSV
+- [ ] Custom tag creation
 
 ---
 
@@ -129,4 +144,4 @@ open index.html
 
 ---
 
-*Part of the **Falcon's Hunt** ecosystem — 11 live projects built from a smartphone.*
+*Part of the **Falcon's Hunt** ecosystem — 19+ live projects built from a smartphone.*
