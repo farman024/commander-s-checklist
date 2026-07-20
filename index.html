@@ -24,12 +24,13 @@
 
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    html, body { background: #000; min-height: 100vh; }
-    body { font-family: 'JetBrains Mono', 'Courier New', monospace; }
+    :root { --accent:#00FF41; --accent-dim:#00FF4188; --accent-bg:#00FF4115; --red:#FF0000; --gold:#FFD700; --surface:#0a0a0a; --sub:#555; --bg:#000; }
+    html, body { background: var(--bg,#000); min-height: 100vh; }
+    body { color: var(--accent,#00FF41); font-family: 'JetBrains Mono', 'Courier New', monospace; }
 
     ::-webkit-scrollbar { width: 4px; }
     ::-webkit-scrollbar-track { background: #000; }
-    ::-webkit-scrollbar-thumb { background: #00FF4133; }
+    ::-webkit-scrollbar-thumb { background: var(--accent-dim,#00FF4133); }
     ::placeholder { color: #444; font-family: 'JetBrains Mono', 'Courier New', monospace; }
 
     @keyframes pulse-red {
@@ -59,11 +60,45 @@
       0%, 100% { opacity: 1; }
       50% { opacity: 0; }
     }
+    @keyframes fade-up {
+      from { opacity: 0; transform: translateY(12px); }
+      to { opacity: 1; transform: translateY(0); }
+    }
     .glitch-active { animation: glitch 0.15s ease-in-out; }
     .pulse-red-anim { animation: pulse-red 1.5s ease-in-out infinite; }
     .flicker { animation: flicker-in 0.7s ease-out forwards; }
     .success-bg { animation: success-pulse 2s ease-out forwards; }
-    .cursor::after { content: '_'; animation: blink 1s step-end infinite; color: #00FF41; }
+    .cursor::after { content: '_'; animation: blink 1s step-end infinite; color: var(--accent,#00FF41); }
+    .fade-up { animation: fade-up 0.35s ease-out forwards; }
+    .input-group { position: relative; display: flex; align-items: center; }
+    .input-group .cursor { display: none; font-size: 14px; color: var(--accent,#00FF41); margin-left: 2px; }
+    .input-group:focus-within .cursor { display: inline; }
+
+    .app-container { width:100%; max-width:480px; margin:0 auto; padding:24px 16px; min-height:100vh; }
+    .desktop-layout { display:flex; gap:24px; }
+    .desktop-layout > .desktop-sidebar { width:280px; flex-shrink:0; }
+    .desktop-layout > .desktop-main { flex:1; min-width:0; }
+
+    @media (min-width: 820px) {
+      .app-container { max-width:960px; padding:32px 40px; }
+      .two-col-grid { display:grid; grid-template-columns:1fr 1fr; gap:20px; }
+      .calendar-grid { gap:4px; }
+      .calendar-grid > div { min-height:36px; font-size:11px !important; }
+      .history-scroll { max-height:500px !important; }
+      .desktop-flex-row { display:flex !important; gap:16px; align-items:flex-start; }
+      .desktop-flex-row > * { flex:1; border-bottom:none !important; }
+      .stat-grid-mobile { display:grid !important; grid-template-columns:1fr 1fr; gap:12px; }
+      .stat-grid-mobile > div { padding:16px 12px; border-bottom:1px solid #0d0d0d; margin:0; }
+    }
+    @media (max-width: 819px) {
+      .mobile-only { display:block; }
+      .desktop-only { display:none !important; }
+    }
+    @media (min-width: 820px) {
+      .mobile-only { display:none !important; }
+      .desktop-only { display:block; }
+      .desktop-inline { display:inline !important; }
+    }
   </style>
 </head>
 <body>
@@ -97,7 +132,7 @@
     }
 
     const MockDB = {
-      defaultState: () => ({ streak:0, lastSubmitDate:null, logs:[], name:null, codename:null }),
+      defaultState: () => ({ streak:0, lastSubmitDate:null, logs:[], name:null, codename:null, freezes:0, xp:0 }),
 
       // Save to localStorage instantly, push to Supabase async
       setState: (data) => {
@@ -192,10 +227,109 @@
     const today = () => new Date().toISOString().split("T")[0];
     const yesterday = () => { const d = new Date(); d.setDate(d.getDate()-1); return d.toISOString().split("T")[0]; };
 
+    const MILESTONES = [
+      { days: 7, label: "APPRENTICE" },
+      { days: 14, label: "GRUNT" },
+      { days: 30, label: "VETERAN" },
+      { days: 60, label: "ELITE" },
+      { days: 90, label: "LEGEND" },
+    ];
+    const XP_PER_GREEN = 50, XP_PER_RED = 10, XP_MILESTONE_BONUS = 100;
+    const LEVELS = [0, 200, 500, 1000, 1800, 2800, 4000, 5500, 7500, 10000];
+    function getLevel(xp) {
+      let lvl = 0;
+      for (let i = 0; i < LEVELS.length; i++) { if (xp >= LEVELS[i]) lvl = i; }
+      return { level: lvl, nextThreshold: LEVELS[lvl + 1] || null, current: xp - (LEVELS[lvl] || 0), needed: (LEVELS[lvl + 1] || xp) - (LEVELS[lvl] || 0) };
+    }
+    function getMilestone(streak) {
+      const m = MILESTONES.filter(m => streak >= m.days);
+      return m.length > 0 ? m[m.length - 1] : null;
+    }
+    function getNextMilestone(streak) {
+      for (const m of MILESTONES) {
+        if (streak < m.days) return m;
+      }
+      return null;
+    }
+
+    // ============================================================
+    // THEME ENGINE
+    // ============================================================
+    const THEME_KEY = 'cdr_theme';
+    const THEMES = {
+      cyber: { name:"Cyber Green", accent:"#00FF41", bg:"#000", surface:"#0a0a0a", red:"#FF0000", gold:"#FFD700", secondary:"#00cc33", sub:"#555" },
+      amber: { name:"Matrix Amber", accent:"#FFB000", bg:"#000", surface:"#0d0a00", red:"#FF4400", gold:"#FFD700", secondary:"#cc8800", sub:"#665500" },
+      ice: { name:"Ice Blue", accent:"#00CCFF", bg:"#000510", surface:"#0a0a14", red:"#FF3366", gold:"#FFD700", secondary:"#0099cc", sub:"#335566" },
+      phantom: { name:"Phantom Purple", accent:"#BB66FF", bg:"#080010", surface:"#10041c", red:"#FF3366", gold:"#FFD700", secondary:"#9944dd", sub:"#553377" },
+      ember: { name:"Ember Red", accent:"#FF5533", bg:"#100804", surface:"#1a0e08", red:"#FF0000", gold:"#FFB800", secondary:"#cc4422", sub:"#663322" },
+      stealth: { name:"Stealth White", accent:"#E0E0E0", bg:"#0a0a0a", surface:"#121212", red:"#FF5555", gold:"#FFD700", secondary:"#aaa", sub:"#555" },
+    };
+    function getTheme() {
+      try { const t = localStorage.getItem(THEME_KEY); return THEMES[t] || THEMES.cyber; } catch { return THEMES.cyber; }
+    }
+    function setTheme(name) {
+      try { localStorage.setItem(THEME_KEY, name); } catch {}
+      const t = THEMES[name] || THEMES.cyber;
+      document.documentElement.style.setProperty('--accent', t.accent);
+      document.documentElement.style.setProperty('--accent-dim', t.accent + '88');
+      document.documentElement.style.setProperty('--accent-bg', t.accent + '15');
+      document.documentElement.style.setProperty('--red', t.red);
+      document.documentElement.style.setProperty('--gold', t.gold);
+      document.documentElement.style.setProperty('--surface', t.surface);
+      document.documentElement.style.setProperty('--sub', t.sub);
+      try { document.querySelector('meta[name="theme-color"]')?.setAttribute('content', t.accent); } catch {}
+    }
+
+    // ============================================================
+    // NOTIFICATION ENGINE
+    // ============================================================
+    const NOTIF_KEY = 'cdr_notif';
+    const REMINDER_KEY = 'cdr_reminder';
+    function notifEnabled() {
+      if (!("Notification" in window)) return false;
+      return Notification.permission === "granted";
+    }
+    function requestNotifPermission() {
+      if (!("Notification" in window)) return false;
+      if (Notification.permission === "granted") return true;
+      Notification.requestPermission();
+      return false;
+    }
+    function setReminderTime(time) {
+      try { localStorage.setItem(REMINDER_KEY, time); } catch {}
+    }
+    function getReminderTime() {
+      try { return localStorage.getItem(REMINDER_KEY) || ""; } catch { return ""; }
+    }
+    function initReminderChecker() {
+      const reminderTime = getReminderTime();
+      if (!reminderTime) return;
+      setInterval(() => {
+        const now = new Date();
+        const [h, m] = reminderTime.split(':').map(Number);
+        if (now.getHours() === h && now.getMinutes() === m) {
+          if (notifEnabled()) {
+            try { new Notification("Commander's Checklist", { body: "Daily audit awaits, Commander.", icon: "icon.svg" }); } catch {}
+          }
+        }
+      }, 60000);
+    }
+
     // ============================================================
     // SOUND ENGINE
     // ============================================================
+    const SOUND_KEY = 'cdr_sound';
+    function soundEnabled() {
+      try { const v = localStorage.getItem(SOUND_KEY); return v === null ? true : v === 'true'; }
+      catch { return true; }
+    }
+    function toggleSound() {
+      const next = !soundEnabled();
+      try { localStorage.setItem(SOUND_KEY, next); } catch {}
+      return next;
+    }
     function playSuccessSound() {
+      if (!soundEnabled()) return;
       try {
         const ctx = new (window.AudioContext || window.webkitAudioContext)();
         const now = ctx.currentTime;
@@ -323,11 +457,28 @@
       );
     }
 
+    function TypewriterText({ text, speed = 25 }) {
+      const [displayed, setDisplayed] = useState("");
+      const idx = useRef(0);
+      useEffect(() => {
+        idx.current = 0;
+        setDisplayed("");
+        const iv = setInterval(() => {
+          if (idx.current < text.length) {
+            setDisplayed(text.slice(0, idx.current + 1));
+            idx.current++;
+          } else { clearInterval(iv); }
+        }, speed);
+        return () => clearInterval(iv);
+      }, [text, speed]);
+      return <>{displayed}</>;
+    }
+
     function QuoteBox({ text, variant="discipline" }) {
       const col = variant==="shutdown"?"#FF0000":variant==="restore"?"#FFD700":"#00FF41";
       return (
         <div style={{
-          borderLeft:`3px solid ${col}`, border:`1px solid ${col}18`,
+          border:`1px solid ${col}18`,
           borderLeft:`3px solid ${col}`,
           padding:"14px 16px", margin:"16px 0",
           background:`${col}07`,
@@ -336,7 +487,7 @@
             fontSize:"11px", color:col, letterSpacing:"0.05em",
             lineHeight:"1.8", textShadow:`0 0 6px ${col}44`, fontStyle:"italic",
           }}>
-            // "{text}"
+            // "<TypewriterText text={text} />"
           </div>
         </div>
       );
@@ -379,21 +530,153 @@
       );
     }
 
+    function StreakProgress({ streak }) {
+      const next = getNextMilestone(streak);
+      if (!next) return null;
+      const prev = getMilestone(streak);
+      const base = prev ? prev.days : 0;
+      const pct = Math.min(100, Math.round(((streak - base) / (next.days - base)) * 100));
+      return (
+        <div style={{ marginTop:"10px" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", fontSize:"9px", color:"#666", marginBottom:"4px", letterSpacing:"0.05em" }}>
+            <span>{streak}/{next.days} — {next.label}</span>
+            <span>{pct}%</span>
+          </div>
+          <div style={{ border:"1px solid #1a1a1a", padding:"2px", height:"6px" }}>
+            <div style={{ width:`${pct}%`, height:"100%", background:"#00FF41", transition:"width 0.5s", boxShadow:"0 0 4px rgba(0,255,65,0.4)" }} />
+          </div>
+        </div>
+      );
+    }
+
+    function ParticleBurst() {
+      const canvasRef = useRef(null);
+      useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+        const ctx = canvas.getContext("2d");
+        const w = canvas.width = 300, h = canvas.height = 300;
+        const particles = Array.from({length:40}, () => ({
+          x: w/2, y: h/2,
+          vx: (Math.random() - 0.5) * 8,
+          vy: (Math.random() - 0.5) * 8 - 2,
+          size: 2 + Math.random() * 3,
+          life: 1,
+          decay: 0.01 + Math.random() * 0.015,
+          color: Math.random() > 0.3 ? "#00FF41" : "#00cc33",
+        }));
+        let frame = requestAnimationFrame(function animate() {
+          ctx.clearRect(0, 0, w, h);
+          let alive = false;
+          for (const p of particles) {
+            p.x += p.vx; p.y += p.vy;
+            p.vy += 0.08;
+            p.life -= p.decay;
+            if (p.life > 0) {
+              alive = true;
+              ctx.globalAlpha = p.life;
+              ctx.fillStyle = p.color;
+              ctx.shadowBlur = 6; ctx.shadowColor = "#00FF41";
+              ctx.fillRect(p.x - p.size/2, p.y - p.size/2, p.size, p.size);
+            }
+          }
+          ctx.shadowBlur = 0; ctx.globalAlpha = 1;
+          if (alive) frame = requestAnimationFrame(animate);
+        });
+        return () => cancelAnimationFrame(frame);
+      }, []);
+      return <canvas ref={canvasRef} style={{ position:"absolute", top:"50%", left:"50%", transform:"translate(-50%,-50%)", pointerEvents:"none", width:"300px", height:"300px", zIndex:10 }} />;
+    }
+
+    function Timer({ onClose }) {
+      const [mins, setMins] = useState(25);
+      const [secs, setSecs] = useState(0);
+      const [running, setRunning] = useState(false);
+      const [mode, setMode] = useState("focus"); // focus | break
+      const intervalRef = useRef(null);
+      useEffect(() => {
+        if (!running) { clearInterval(intervalRef.current); return; }
+        intervalRef.current = setInterval(() => {
+          setSecs(s => { if (s > 0) return s - 1; return s; });
+          setMins(m => { if (secs === 0 && m > 0) return m - 1; return m; });
+        }, 1000);
+        return () => clearInterval(intervalRef.current);
+      }, [running, secs, mins]);
+      useEffect(() => {
+        if (mins === 0 && secs === 0 && running) {
+          setRunning(false);
+          playSuccessSound();
+        }
+      }, [mins, secs, running]);
+      const reset = (m) => { setMins(m); setSecs(0); setRunning(false); setMode(m === 25 ? "focus" : "break"); };
+      return (
+        <div style={{ border:"1px solid #00FF4118", padding:"14px", marginBottom:"16px", background:"#00FF4105" }}>
+          <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"10px" }}>
+            <div style={{ fontSize:"10px", color:"#00FF41AA", letterSpacing:"0.1em" }}>// SESSION TIMER — {mode === "focus" ? "FOCUS" : "BREAK"}</div>
+            <button onClick={onClose} style={{ background:"none", border:"none", color:"#556", cursor:"pointer", fontSize:"12px" }}>X</button>
+          </div>
+          <div style={{ textAlign:"center", fontSize:"clamp(32px,8vw,48px)", color:"#00FF41", fontFamily:"'JetBrains Mono','Courier New',monospace", letterSpacing:"0.1em", textShadow:"0 0 20px rgba(0,255,65,0.3)", marginBottom:"12px" }}>
+            {String(mins).padStart(2,"0")}:{String(secs).padStart(2,"0")}
+          </div>
+          <div style={{ display:"flex", gap:"8px", justifyContent:"center" }}>
+            <button onClick={() => setRunning(!running)} style={{
+                                 background:"transparent", border:`1px solid ${getTheme().accent}`, color: getTheme().accent,
+              fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"10px",
+              padding:"6px 16px", cursor:"pointer", letterSpacing:"0.1em",
+            }}>{running ? "PAUSE" : "START"}</button>
+            <button onClick={() => reset(25)} style={{
+              background:"transparent", border:"1px solid #556", color:"#888",
+              fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"10px",
+              padding:"6px 12px", cursor:"pointer", letterSpacing:"0.1em",
+            }}>FOCUS</button>
+            <button onClick={() => reset(5)} style={{
+              background:"transparent", border:"1px solid #556", color:"#888",
+              fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"10px",
+              padding:"6px 12px", cursor:"pointer", letterSpacing:"0.1em",
+            }}>BREAK</button>
+          </div>
+        </div>
+      );
+    }
+
+    function ToastContainer({ toasts, onDismiss }) {
+      return (
+        <div style={{ position:"fixed", bottom:"20px", left:"50%", transform:"translateX(-50%)", zIndex:9998, display:"flex", flexDirection:"column", gap:"8px", alignItems:"center", pointerEvents:"none" }}>
+          {toasts.map((t,i) => (
+            <div key={t.id} style={{
+              background:"#0a0a0a", border:`1px solid ${t.variant === "error" ? "#FF000044" : "#00FF4144"}`,
+              borderLeft:`3px solid ${t.variant === "error" ? "#FF0000" : "#00FF41"}`,
+              padding:"10px 18px", fontSize:"11px", color: t.variant === "error" ? "#FF0000" : "#00FF41",
+              letterSpacing:"0.08em", boxShadow:"0 0 20px rgba(0,0,0,0.8)",
+              pointerEvents:"auto", animation:"fade-up 0.3s ease-out forwards",
+              whiteSpace:"nowrap",
+            }}>
+              {t.variant === "error" ? "// ERROR: " : "// "}{t.message}
+            </div>
+          ))}
+        </div>
+      );
+    }
+
+    let toastId = 0;
+
     // ============================================================
     // SCREENS
     // ============================================================
 
-    function BreachScreen({ onResolve }) {
+    function BreachScreen({ onResolve, missedDays = 1, freezes = 0 }) {
       const [choice, setChoice] = useState(null);
+      const [useFreeze, setUseFreeze] = useState(false);
       return (
         <div style={{ padding:"0 0 30px" }}>
           <div className="pulse-red-anim" style={{ textAlign:"center", marginBottom:"30px" }}>
-            <div style={{ fontSize:"clamp(20px,5vw,30px)", color:"#FF0000", letterSpacing:"0.2em", textShadow:"0 0 20px rgba(255,0,0,0.8)", marginBottom:"8px" }}>
-              ⚠ BREACH DETECTED
-            </div>
-            <div style={{ fontSize:"11px", color:"#FF000077", letterSpacing:"0.15em" }}>
-              // CHECKLIST NOT FILED — YESTERDAY
-            </div>
+              <div style={{ fontSize:"clamp(20px,5vw,30px)", color:"#FF0000", letterSpacing:"0.2em", textShadow:"0 0 20px rgba(255,0,0,0.8)", marginBottom:"8px", display:"flex", alignItems:"center", justifyContent:"center", gap:"10px" }}>
+                <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="#FF0000" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M12 2L2 22h20L12 2z"/><line x1="12" y1="10" x2="12" y2="16"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>
+                BREACH DETECTED
+              </div>
+              <div style={{ fontSize:"11px", color:"#FF000077", letterSpacing:"0.15em" }}>
+                {missedDays === 1 ? "// CHECKLIST NOT FILED — YESTERDAY" : `// CHECKLIST NOT FILED — ${missedDays} DAYS AGO`}
+              </div>
           </div>
 
           {!choice ? (
@@ -402,9 +685,24 @@
                 {">"} INCIDENT REPORT REQUIRED.<br/>
                 {">"} STATE THE REASON FOR NON-COMPLIANCE:
               </div>
+              {freezes > 0 && (
+                <Btn onClick={()=>{setUseFreeze(true);setChoice("freeze");}} variant="warn">
+                  Use Streak Freeze ({freezes} available)
+                </Btn>
+              )}
               <Btn onClick={()=>setChoice("forgot")} variant="warn">Forgot / Was Unwell</Btn>
               <Btn onClick={()=>setChoice("broke")} variant="danger">Broke The Rule</Btn>
             </>
+          ) : choice==="freeze" ? (
+            <div>
+              <div style={{ fontSize:"14px", color:"#00FF41", textAlign:"center", letterSpacing:"0.1em", margin:"20px 0", textShadow:"0 0 10px rgba(0,255,65,0.5)" }}>
+                // STREAK FROZEN — INTEGRITY MAINTAINED
+              </div>
+              <div style={{ fontSize:"11px", color:"#888", marginBottom:"20px", lineHeight:"1.8" }}>
+                {">"} One freeze consumed. Streak preserved. Earn it back.
+              </div>
+              <Btn onClick={()=>onResolve("freeze")} variant="primary">Acknowledge — Use Freeze</Btn>
+            </div>
           ) : choice==="forgot" ? (
             <div>
               <div style={{ fontSize:"14px", color:"#FFD700", textAlign:"center", letterSpacing:"0.1em", margin:"20px 0", textShadow:"0 0 10px rgba(255,215,0,0.5)" }}>
@@ -441,7 +739,9 @@
       useEffect(() => { const t = setTimeout(()=>setPulse(false),2000); return ()=>clearTimeout(t); }, []);
 
       return (
-        <div className={pulse && !isFailure ? "success-bg" : ""} style={{ textAlign:"center", padding:"10px 0 30px" }}>
+        <div className={pulse && !isFailure ? "success-bg" : ""} style={{ textAlign:"center", padding:"10px 0 30px", position:"relative" }}>
+
+          {!isFailure && <ParticleBurst />}
 
           {!isFailure && (
             <div className="flicker" style={{ marginBottom:"24px", padding:"20px 0 8px", textAlign:"center" }}>
@@ -484,25 +784,105 @@
       );
     }
 
-    function ChecklistForm({ state, name, codename, onSubmit }) {
+    const TAGS = ["focus","grind","recovery","rest","break","other"];
+    function ChecklistForm({ state, name, codename, onSubmit, timerOpen, onToggleTimer }) {
       const [energy, setEnergy] = useState(false);
       const [alterEgo, setAlterEgo] = useState(false);
       const [improvement, setImprovement] = useState("");
       const [encrypting, setEncrypting] = useState(false);
       const [done, setDone] = useState(false);
+      const [confirming, setConfirming] = useState(false);
+      const [tag, setTag] = useState("");
+      const [journalMode, setJournalMode] = useState(false);
+      const ac = () => getTheme().accent;
+      const acd = () => ac() + "AA";
+      const acBg = () => ac() + "15";
 
-      if (done) return <ResultScreen alterEgoWon={alterEgo} improvement={improvement} onDone={()=>onSubmit({energy,alterEgo,improvement})} />;
+      if (done) return <ResultScreen alterEgoWon={alterEgo} improvement={improvement} onDone={()=>onSubmit({energy,alterEgo,improvement,tag})} />;
       if (encrypting) return <ProgressBar label="// ENCRYPTING LOGS..." onComplete={()=>setDone(true)} alterEgoWon={alterEgo} />;
+      if (confirming) return (
+        <div style={{ padding:"10px 0 30px" }}>
+          <div style={{ fontSize:"11px", color: ac(), letterSpacing:"0.15em", marginBottom:"16px", textShadow:`0 0 8px ${ac()}80` }}>
+            // CONFIRM SUBMISSION
+          </div>
+          <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+            <div style={{ fontSize:"11px", color:"#888", marginBottom:"8px" }}>// DAILY AUDIT SUMMARY</div>
+            <div style={{ fontSize:"12px", color: energy ? ac() : "#aaa", marginBottom:"4px" }}>
+              {">"} Energy: {energy ? "PROTECTED" : "NOT PROTECTED"}
+            </div>
+            <div style={{ fontSize:"12px", color: alterEgo ? "#FF0000" : ac(), marginBottom:"4px" }}>
+              {">"} Alter Ego: {alterEgo ? "WON (RED DAY)" : "CONTAINED (GREEN DAY)"}
+            </div>
+            {improvement.trim() && (
+              <div style={{ fontSize:"12px", color:"#bbb", marginBottom:"4px" }}>
+                {">"} Directive: {improvement.trim()}
+              </div>
+            )}
+            <div style={{ marginTop:"8px" }}>
+              <div style={{ fontSize:"9px", color:"#666", marginBottom:"4px" }}>{">"} TAG:</div>
+              <div style={{ display:"flex", gap:"4px", flexWrap:"wrap" }}>
+                {TAGS.map(t => (
+                  <button key={t} onClick={() => setTag(t === tag ? "" : t)} style={{
+                    background: tag === t ? acBg() : "transparent",
+                    border: `1px solid ${tag === t ? ac() : "#1a1a1a"}`,
+                    color: tag === t ? ac() : "#555",
+                    fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px",
+                    padding:"3px 8px", cursor:"pointer", letterSpacing:"0.05em",
+                  }}>{t.toUpperCase()}</button>
+                ))}
+              </div>
+            </div>
+            {alterEgo && (
+              <div style={{ fontSize:"11px", color:"#FF000088", marginTop:"10px", borderTop:"1px solid #FF000022", paddingTop:"10px" }}>
+                WARNING: This will reset your streak to 0.
+              </div>
+            )}
+          </div>
+          <Btn onClick={() => { setConfirming(false); setEncrypting(true); }} variant={alterEgo?"danger":"primary"}>
+            Confirm & Encrypt
+          </Btn>
+          <Btn onClick={() => setConfirming(false)} variant="primary">
+            Cancel
+          </Btn>
+        </div>
+      );
 
       return (
         <div>
           <div style={{ textAlign:"center", padding:"20px 0 24px", borderBottom:"1px solid #0d0d0d", marginBottom:"24px" }}>
             <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.15em", marginBottom:"2px" }}>// COMMANDER: {codename.toUpperCase()}</div>
             <div style={{ fontSize:"11px", color:"#888", letterSpacing:"0.15em", marginBottom:"4px" }}>// DAYS OF DISCIPLINE</div>
-            <div style={{ fontSize:"clamp(52px,13vw,76px)", color:"#00FF41", textShadow:"0 0 30px rgba(0,255,65,0.4)", lineHeight:"1" }}>
+            <div style={{ fontSize:"clamp(52px,13vw,76px)", color: ac(), textShadow:`0 0 30px ${ac()}66`, lineHeight:"1" }}>
               {String(state.streak).padStart(3,"0")}
             </div>
+            {(() => { const l = getLevel(state.xp||0); return (
+              <div style={{ fontSize:"9px", color: acd(), letterSpacing:"0.1em", marginTop:"4px" }}>
+                LV.{l.level} — {l.nextThreshold ? `${l.current}/${l.needed} XP` : "MAX LEVEL"}
+              </div>
+            ); })()}
+            {getMilestone(state.streak) && (
+              <div style={{ marginTop:"8px", display:"flex", justifyContent:"center" }}>
+                <div style={{
+                  border:"1px solid #FFD700", color:"#FFD700", fontSize:"9px",
+                  letterSpacing:"0.2em", padding:"4px 12px",
+                  textShadow:"0 0 8px rgba(255,215,0,0.5)",
+                  boxShadow:"0 0 8px rgba(255,215,0,0.25)",
+                }}>
+                  // {getMilestone(state.streak).label} — {getMilestone(state.streak).days}-DAY STREAK
+                </div>
+              </div>
+            )}
+            <StreakProgress streak={state.streak} />
+            <div style={{ marginTop:"8px", display:"flex", gap:"6px", justifyContent:"center" }}>
+              <button onClick={onToggleTimer} style={{
+                background:"transparent", border:`1px solid ${ac()}66`, color: ac(),
+                fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px",
+                padding:"4px 10px", cursor:"pointer", letterSpacing:"0.1em",
+              }}>{timerOpen ? "CLOSE TIMER" : "SESSION TIMER"}</button>
+            </div>
           </div>
+
+          {timerOpen && <Timer onClose={onToggleTimer} />}
 
           <div style={{ marginBottom:"24px" }}>
             <Toggle label="Protected my energy today" value={energy} onChange={setEnergy} />
@@ -510,39 +890,99 @@
           </div>
 
           <div style={{ marginBottom:"24px" }}>
-            <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.1em", marginBottom:"8px" }}>{">"} 1% IMPROVEMENT FOR TOMORROW:</div>
-            <textarea
-              value={improvement}
-              onChange={e=>setImprovement(e.target.value)}
-              placeholder="> Enter directive..."
-              onFocus={e=>e.target.style.borderColor="#00FF41"}
-              onBlur={e=>e.target.style.borderColor="#1a1a1a"}
-              style={{
-                width:"100%", minHeight:"80px",
-                background:"#000", border:"1px solid #1a1a1a",
-                color:"#00FF41", fontFamily:"'JetBrains Mono','Courier New',monospace",
-                fontSize:"12px", padding:"12px", resize:"none",
-                outline:"none", caretColor:"#00FF41", lineHeight:"1.6",
-                transition:"border-color 0.2s",
-              }}
-            />
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom:"8px" }}>
+              <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.1em" }}>{">"} 1% IMPROVEMENT FOR TOMORROW:</div>
+              <button onClick={() => setJournalMode(!journalMode)} style={{
+                background:"transparent", border:"1px solid #1a1a1a", color:"#666",
+                fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"8px",
+                padding:"3px 8px", cursor:"pointer", letterSpacing:"0.1em",
+              }}>{journalMode ? "SIMPLE" : "JOURNAL"}</button>
+            </div>
+            <div className="input-group" style={{ alignItems:"flex-start" }}>
+              <textarea
+                value={improvement}
+                onChange={e=>setImprovement(e.target.value)}
+                placeholder={journalMode ? "> Write your journal entry... (no character limit)" : "> Enter directive..."}
+                maxLength={journalMode ? 5000 : 500}
+                onFocus={e=>e.target.style.borderColor=ac()}
+                onBlur={e=>e.target.style.borderColor="#1a1a1a"}
+                style={{
+                  width:"100%", minHeight: journalMode ? "200px" : "80px",
+                  background:"#000", border:`1px solid ${journalMode ? ac()+"66" : "#1a1a1a"}`,
+                  color: ac(), fontFamily:"'JetBrains Mono','Courier New',monospace",
+                  fontSize:"12px", padding:"12px", resize:"none",
+                  outline:"none", caretColor: ac(), lineHeight:"1.6",
+                  transition:"border-color 0.2s, min-height 0.3s",
+                }}
+              /><span className="cursor" style={{ alignSelf:"flex-end", marginBottom:"12px" }} />
+            </div>
           </div>
 
-          <Btn onClick={()=>setEncrypting(true)} disabled={!improvement.trim()} variant={alterEgo?"danger":"primary"}>
+          <Btn onClick={()=>setConfirming(true)} variant={alterEgo?"danger":"primary"}>
             Submit Daily Audit
           </Btn>
         </div>
       );
     }
 
-    function AlreadyFiledScreen({ state, name, codename }) {
-      const [tab, setTab] = useState("home"); // home | stats | history
+    function AlreadyFiledScreen({ state, name, codename, onUpdate, addToast, soundOn, onToggleSound, onExport, onReset, onUndo, timerOpen, onToggleTimer, onApplyTheme }) {
+      const [tab, setTab] = useState("home");
+      const [editingIndex, setEditingIndex] = useState(null);
+      const [editValue, setEditValue] = useState("");
       const logs = state.logs || [];
+      const lastLog = logs.length > 0 ? logs[logs.length - 1] : null;
+      const hoursSince = lastLog ? Math.round((new Date() - new Date(lastLog.date + 'T00:00:00')) / 3600000) : null;
+
+      const handleDeleteLog = (index) => {
+        if (!window.confirm("Delete this entry? Streak will recalculate.")) return;
+        const newLogs = logs.filter((_, i) => i !== index);
+        const sorted = [...newLogs].sort((a,b) => b.date.localeCompare(a.date));
+        let newStreak = 0;
+        for (const log of sorted) {
+          if (!log.alterEgo) newStreak++;
+          else break;
+        }
+        const newLastSubmit = sorted.length > 0 ? sorted[0].date : null;
+        onUpdate({ ...state, logs: newLogs, streak: newStreak, lastSubmitDate: newLastSubmit });
+        addToast?.("Entry deleted", "info");
+      };
+
+      const ac = () => getTheme().accent;
+      const acDim = () => getTheme().accent + "88";
+      const acBg = () => getTheme().accent + "15";
+
+      const handleEditLog = (index) => {
+        const newLogs = [...logs];
+        newLogs[index] = { ...newLogs[index], improvement: editValue };
+        onUpdate({ ...state, logs: newLogs });
+        setEditingIndex(null);
+        setEditValue("");
+      };
+
+      // ── Daily Challenges ────────────────────────────────────────
+      const CHALLENGES = [
+        { text:"Complete audit before 09:00", xp:20 },
+        { text:"Write a 50+ character journal entry", xp:15 },
+        { text:"Score 100% energy on today's audit", xp:10 },
+        { text:"Mark a tag on today's entry", xp:10 },
+        { text:"Log in before 12:00", xp:15 },
+        { text:"Achieve a 3-day streak", xp:25 },
+        { text:"No red days this week", xp:30 },
+        { text:"Complete 5 audits this week", xp:20 },
+        { text:"Write improvement for 3 consecutive days", xp:20 },
+        { text:"Use streak freeze wisely", xp:15 },
+      ];
+      const todayChallenge = (() => {
+        const idx = (state.name?.length||0) + new Date().getDate() + new Date().getMonth();
+        return CHALLENGES[idx % CHALLENGES.length];
+      })();
+      const challengeClaimed = state.challenges?.[today()]===true;
 
       // ── Stats calculations ──────────────────────────────────────
       const totalDays = logs.length;
       const greenDays = logs.filter(l => !l.alterEgo).length;
       const redDays = logs.filter(l => l.alterEgo).length;
+      const energyDays = logs.filter(l => l.energy).length;
       const winRate = totalDays > 0 ? Math.round((greenDays / totalDays) * 100) : 0;
 
       // Longest streak from logs
@@ -561,19 +1001,42 @@
         return { dateStr, log, dayName };
       });
 
-      // Monthly heatmap — last 5 weeks (35 days)
-      const heatmapDays = Array.from({length:35}, (_,i) => {
-        const d = new Date(); d.setDate(d.getDate() - (34-i));
-        const dateStr = d.toISOString().split("T")[0];
+      // Monthly calendar data
+      const now = new Date();
+      const currentMonth = now.getMonth();
+      const currentYear = now.getFullYear();
+      const firstDayOfWeek = new Date(currentYear, currentMonth, 1).getDay();
+      const daysInMonth = new Date(currentYear, currentMonth + 1, 0).getDate();
+      const monthName = now.toLocaleDateString("en-US", { month:"long", year:"numeric" }).toUpperCase();
+      const dayHeaders = ["SUN","MON","TUE","WED","THU","FRI","SAT"];
+      const calendarDays = Array.from({length: daysInMonth}, (_, i) => {
+        const day = i + 1;
+        const dateStr = `${currentYear}-${String(currentMonth+1).padStart(2,"0")}-${String(day).padStart(2,"0")}`;
         const log = logs.find(l => l.date === dateStr);
-        return { dateStr, log };
+        return { day, dateStr, log };
       });
+
+      // Weekly sparkline data (last 4 weeks)
+      const weeklyData = (() => {
+        const weeks = [];
+        for (let w = 0; w < 4; w++) {
+          const weekLogs = logs.filter(l => {
+            const d = new Date(l.date + 'T00:00:00');
+            const daysAgo = Math.round((new Date() - d) / 86400000);
+            return daysAgo >= w * 7 && daysAgo < (w + 1) * 7;
+          });
+          const total = weekLogs.length;
+          const green = weekLogs.filter(l => !l.alterEgo).length;
+          weeks.push(total > 0 ? Math.round((green / total) * 100) : -1);
+        }
+        return weeks.reverse();
+      })();
 
       const TabBtn = ({ id, label }) => (
         <button onClick={() => setTab(id)} style={{
-          background: tab===id ? "#00FF4115" : "transparent",
-          border: `1px solid ${tab===id ? "#00FF41" : "#1a1a1a"}`,
-          color: tab===id ? "#00FF41" : "#555",
+          background: tab===id ? acBg() : "transparent",
+          border: `1px solid ${tab===id ? ac() : "#1a1a1a"}`,
+          color: tab===id ? ac() : "#555",
           fontFamily:"'JetBrains Mono','Courier New',monospace",
           fontSize:"10px", letterSpacing:"0.1em",
           padding:"7px 14px", cursor:"pointer",
@@ -586,38 +1049,111 @@
         <div style={{ padding:"20px 0" }}>
           {/* Streak */}
           <div style={{ textAlign:"center", marginBottom:"20px" }}>
-            <div style={{ fontSize:"clamp(52px,13vw,76px)", color:"#00FF41", textShadow:"0 0 30px rgba(0,255,65,0.4)", lineHeight:"1", marginBottom:"4px" }}>
+            <div style={{ fontSize:"clamp(52px,13vw,76px)", color:ac(), textShadow:`0 0 30px ${acDim()}`, lineHeight:"1", marginBottom:"4px" }}>
               {String(state.streak).padStart(3,"0")}
             </div>
             <div style={{ fontSize:"11px", color:"#888", letterSpacing:"0.15em" }}>// DAYS OF DISCIPLINE</div>
+            {(() => { const l = getLevel(state.xp||0); return (
+              <div style={{ fontSize:"9px", color: acDim(), letterSpacing:"0.1em", marginTop:"4px" }}>
+                LV.{l.level} — {l.nextThreshold ? `${l.current}/${l.needed} XP` : "MAX LEVEL"}
+              </div>
+            ); })()}
+            {getMilestone(state.streak) && (
+              <div style={{ marginTop:"10px", display:"flex", justifyContent:"center" }}>
+                <div style={{
+                  border:"1px solid #FFD700", color:"#FFD700", fontSize:"9px",
+                  letterSpacing:"0.2em", padding:"4px 12px",
+                  textShadow:"0 0 8px rgba(255,215,0,0.5)",
+                  boxShadow:"0 0 8px rgba(255,215,0,0.25)",
+                }}>
+                  // {getMilestone(state.streak).label} — {getMilestone(state.streak).days}-DAY STREAK
+                </div>
+              </div>
+            )}
+            <StreakProgress streak={state.streak} />
           </div>
 
           {/* Tabs */}
           <div style={{ display:"flex", gap:"6px", marginBottom:"20px" }}>
             <TabBtn id="home" label="Home" />
+            <TabBtn id="report" label="Report" />
             <TabBtn id="stats" label="Stats" />
             <TabBtn id="history" label="History" />
+            <TabBtn id="settings" label="Settings" />
           </div>
 
           {/* ── HOME TAB ── */}
           {tab === "home" && (
             <div>
               <div style={{ border:"1px solid #001a00", padding:"14px 16px", marginBottom:"16px" }}>
-                <div style={{ fontSize:"11px", color:"#00FF4190", letterSpacing:"0.1em", lineHeight:"2" }}>
+                <div style={{ fontSize:"11px", color: acDim(), letterSpacing:"0.1em", lineHeight:"2" }}>
                   // AUDIT LOGGED FOR TODAY<br/>{">"} Return tomorrow, {name}.
                 </div>
+                <div style={{ fontSize:"9px", color:"#555", letterSpacing:"0.08em", marginTop:"8px", borderTop:"1px solid #001a00", paddingTop:"8px", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <span>
+                    {">"} Last check-in: {hoursSince !== null ? (hoursSince < 1 ? "Less than an hour ago" : hoursSince < 24 ? `${hoursSince}h ago` : `${Math.floor(hoursSince/24)}d ago`) : "Just now"}
+                  </span>
+                  <span style={{ color: acDim() }}>{state.freezes > 0 ? `FREEZES: ${state.freezes}` : ""}</span>
+                </div>
+                <div style={{ marginTop:"10px", display:"flex", gap:"8px" }}>
+                  {onUndo && (
+                    <button onClick={onUndo} style={{
+                      background:"transparent", border:"1px solid #FFD70044", color:"#FFD700",
+                      fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px",
+                      padding:"5px 12px", cursor:"pointer", letterSpacing:"0.1em",
+                    }}>UNDO</button>
+                  )}
+                  <button onClick={onToggleTimer} style={{
+                    background:"transparent", border:`1px solid ${acDim()}`, color: ac(),
+                    fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px",
+                    padding:"5px 12px", cursor:"pointer", letterSpacing:"0.1em",
+                  }}>{timerOpen ? "CLOSE TIMER" : "TIMER"}</button>
+                </div>
               </div>
+              {timerOpen && <Timer onClose={onToggleTimer} />}
               <QuoteBox text={getRandom(QUOTES.discipline)} variant="discipline" />
+
+              {/* Daily Challenge */}
+              <div style={{ border:"1px solid #FFD70022", padding:"12px 14px", marginTop:"20px" }}>
+                <div style={{ fontSize:"9px", color:"#FFD700AA", letterSpacing:"0.1em", marginBottom:"8px" }}>// DAILY CHALLENGE — {todayChallenge.xp} XP</div>
+                <div style={{ fontSize:"11px", color:challengeClaimed?"#555":"#eee", letterSpacing:"0.05em", marginBottom:"8px" }}>
+                  {challengeClaimed ? <span style={{color:"#555"}}>COMPLETED — {todayChallenge.text}</span> : todayChallenge.text}
+                </div>
+                {!challengeClaimed && (
+                  <button onClick={() => {
+                    const u = {...state, challenges:{...(state.challenges||{}), [today()]:true}, xp:(state.xp||0)+todayChallenge.xp};
+                    onUpdate(u);
+                    addToast?.(`Challenge complete! +${todayChallenge.xp} XP`, "info");
+                  }} style={{
+                    background:"transparent", border:"1px solid #FFD70044", color:"#FFD700",
+                    fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px",
+                    padding:"5px 12px", cursor:"pointer", letterSpacing:"0.1em",
+                  }}>CLAIM XP</button>
+                )}
+              </div>
+
+              {/* Share Card */}
+              <div style={{ marginTop:"16px" }}>
+                <button onClick={() => {
+                  const shareText = `═══ COMMANDER'S CHECKLIST ═══\nName: ${state.name} (${state.codename})\nStreak: ${state.streak} days\nTotal: ${logs.length} audits\nWin Rate: ${winRate}%\nXP: ${state.xp||0} | Level: ${getLevel(state.xp||0).level}\n${getMilestone(state.streak) ? `Badge: ${getMilestone(state.streak).label}\n` : ""}═══ ${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} ═══`;
+                  navigator.clipboard?.writeText(shareText).then(() => addToast?.("Share card copied", "info")).catch(() => addToast?.("Could not copy", "error"));
+                }} style={{
+                  background:"transparent", border:"1px solid #1a1a1a", color:"#888",
+                  fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px",
+                  padding:"6px 14px", cursor:"pointer", letterSpacing:"0.1em", width:"100%",
+                }}>COPY SHARE CARD</button>
+              </div>
 
               {/* 7-day grid */}
               <div style={{ marginTop:"20px" }}>
                 <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"10px" }}>// LAST 7 DAYS</div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"4px" }}>
+                <div className="calendar-grid" style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"4px" }}>
                   {last7.map(({dateStr, log, dayName}) => {
-                    const col = !log ? "#1a1a1a" : log.alterEgo ? "#FF000033" : "#00FF4133";
-                    const border = !log ? "#2a2a2a" : log.alterEgo ? "#FF0000" : "#00FF41";
+                    const col = !log ? "#1a1a1a" : log.alterEgo ? "#FF000033" : acBg();
+                    const border = !log ? "#2a2a2a" : log.alterEgo ? "#FF0000" : ac();
                     return (
-                      <div key={dateStr} style={{ textAlign:"center" }}>
+                      <div key={dateStr} style={{ textAlign:"center" }}
+                        title={log ? `${dateStr}: ${log.alterEgo ? "RED DAY" : "GREEN DAY"}${log.improvement ? ` — ${log.improvement}` : ""}` : `${dateStr}: MISSED`}>
                         <div style={{ fontSize:"8px", color:"#444", marginBottom:"4px", letterSpacing:"0.05em" }}>{dayName}</div>
                         <div style={{
                           height:"32px", background:col,
@@ -632,18 +1168,172 @@
             </div>
           )}
 
+          {/* ── REPORT TAB ── */}
+          {tab === "report" && (
+            <div>
+              <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"16px" }}>// WEEKLY REPORT</div>
+              {(() => {
+                // Current week (Mon-Sun)
+                const weekDays = [];
+                const todayNum = new Date().getDay(); // 0=Sun
+                const monOffset = todayNum === 0 ? -6 : 1 - todayNum;
+                for (let i = 0; i < 7; i++) {
+                  const d = new Date(); d.setDate(d.getDate() + monOffset + i);
+                  const dateStr = d.toISOString().split("T")[0];
+                  const log = logs.find(l => l.date === dateStr);
+                  const dayName = d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase();
+                  weekDays.push({dateStr, log, dayName});
+                }
+                const weekTotal = weekDays.filter(w => w.log).length;
+                const weekGreen = weekDays.filter(w => w.log && !w.log.alterEgo).length;
+                const weekRed = weekDays.filter(w => w.log && w.log.alterEgo).length;
+
+                // Previous week
+                const prevWeekDays = [];
+                for (let i = 0; i < 7; i++) {
+                  const d = new Date(); d.setDate(d.getDate() + monOffset + i - 7);
+                  const dateStr = d.toISOString().split("T")[0];
+                  const log = logs.find(l => l.date === dateStr);
+                  const dayName = d.toLocaleDateString("en-US",{weekday:"short"}).toUpperCase();
+                  prevWeekDays.push({dateStr, log, dayName});
+                }
+                const prevTotal = prevWeekDays.filter(w => w.log).length;
+                const prevGreen = prevWeekDays.filter(w => w.log && !w.log.alterEgo).length;
+
+                return (
+                  <>
+                    {/* Week Overview */}
+                    <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                      <div style={{ fontSize:"9px", color:"#666", marginBottom:"12px" }}>CURRENT WEEK (MON—SUN)</div>
+                      <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"4px", marginBottom:"12px" }}>
+                        {weekDays.map(w => (
+                          <div key={w.dateStr} style={{ textAlign:"center" }}>
+                            <div style={{ fontSize:"7px", color:"#444", marginBottom:"2px" }}>{w.dayName}</div>
+                            <div style={{
+                              height:"24px",                               background: !w.log ? "#1a1a1a" : w.log.alterEgo ? "#FF000033" : acBg(),
+                              border:`1px solid ${!w.log ? "#2a2a2a" : w.log.alterEgo ? "#FF0000" : ac()}`,
+                            }} />
+                          </div>
+                        ))}
+                      </div>
+                      <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.05em" }}>
+                        {weekTotal > 0 ? `${weekGreen}/${weekTotal} GREEN (${weekTotal > 0 ? Math.round(weekGreen/weekTotal*100) : 0}%)` : "No data this week"}
+                      </div>
+                    </div>
+
+                    {/* Week-over-week */}
+                    <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                      <div style={{ fontSize:"9px", color:"#666", marginBottom:"8px" }}>WEEK OVER WEEK</div>
+                      <div style={{ display:"flex", justifyContent:"space-between", gap:"12px" }}>
+                        <div style={{ flex:1, textAlign:"center", border:"1px solid #1a1a1a", padding:"10px" }}>
+                          <div style={{ fontSize:"8px", color:"#555", marginBottom:"4px" }}>LAST WEEK</div>
+                          <div style={{ fontSize:"16px", color: prevGreen > 0 ? ac() : "#555" }}>{prevGreen}</div>
+                          <div style={{ fontSize:"8px", color:"#555" }}>/ {prevTotal} days</div>
+                        </div>
+                        <div style={{ flex:1, textAlign:"center", border:"1px solid #1a1a1a", padding:"10px" }}>
+                          <div style={{ fontSize:"8px", color:"#555", marginBottom:"4px" }}>THIS WEEK</div>
+                          <div style={{ fontSize:"16px", color: weekGreen > 0 ? ac() : "#555" }}>{weekGreen}</div>
+                          <div style={{ fontSize:"8px", color:"#555" }}>/ {weekTotal} days</div>
+                        </div>
+                        <div style={{ flex:1, textAlign:"center", border:"1px solid #1a1a1a", padding:"10px" }}>
+                          <div style={{ fontSize:"8px", color:"#555", marginBottom:"4px" }}>TREND</div>
+                          <div style={{ fontSize:"16px", color: weekGreen > prevGreen ? ac() : weekGreen < prevGreen ? "#FF0000" : "#888" }}>
+                            {prevTotal > 0 ? (weekGreen > prevGreen ? "+" : weekGreen < prevGreen ? "-" : "=") : "—"}
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Focus area */}
+                    <div style={{ border:"1px solid #1a1a1a", padding:"14px" }}>
+                      <div style={{ fontSize:"9px", color:"#666", marginBottom:"8px" }}>WEEKLY FOCUS</div>
+                      <div style={{ fontSize:"11px", color:"#aaa", letterSpacing:"0.05em", lineHeight:"1.8" }}>
+                        {weekTotal === 0 ? "No audits yet this week. Start building momentum." :
+                         weekGreen === weekTotal ? "Perfect week. You're locked in." :
+                         weekGreen >= 5 ? "Strong week. Minor slip — refocus tomorrow." :
+                         weekGreen >= 3 ? "Moderate week. Identify the pattern breaking your streak." :
+                         "Tough week. Reset mentally. Tomorrow is day 1."}
+                      </div>
+                    </div>
+                  </>
+                );
+              })()}
+            </div>
+          )}
+
           {/* ── STATS TAB ── */}
           {tab === "stats" && (
             <div>
               <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"16px" }}>// COMMANDER STATS</div>
 
-              {/* Stat cards */}
+              {/* Insight line */}
+              {totalDays > 0 && (
+                <div style={{
+                  border:"1px solid #00FF4118", padding:"10px 14px", marginBottom:"16px",
+                  background:"#00FF4105",
+                }}>
+                  <div style={{ fontSize:"10px", color: acDim(), letterSpacing:"0.05em", lineHeight:"1.8" }}>
+                    {">"} {winRate >= 80 ? "Exceptional discipline. You're in control." :
+                      winRate >= 60 ? "Solid foundation. Keep stacking green days." :
+                      winRate >= 40 ? "Room to grow. Focus on the alter ego." :
+                      "Hard stretch. Every green day is a win right now."}
+                    {state.streak >= 7 && <span>{"\n"}{">"} {state.streak}-day streak — momentum is building.</span>}
+                    {redDays >= 3 && totalDays >= 10 && <span>{"\n"}{">"} {redDays} red days this month. Audit your triggers.</span>}
+                  </div>
+                </div>
+              )}
+              {/* Mood/energy correlation */}
+              {logs.filter(l => l.energy !== undefined).length >= 5 && (() => {
+                const energyGreen = logs.filter(l => l.energy && !l.alterEgo).length;
+                const energyTotal = logs.filter(l => l.energy).length;
+                const noEnergyGreen = logs.filter(l => !l.energy && !l.alterEgo).length;
+                const noEnergyTotal = logs.filter(l => !l.energy).length;
+                const energyRate = energyTotal > 0 ? Math.round((energyGreen/energyTotal)*100) : 0;
+                const noEnergyRate = noEnergyTotal > 0 ? Math.round((noEnergyGreen/noEnergyTotal)*100) : 0;
+                return (
+                  <div style={{ border:"1px solid #00FF4118", padding:"10px 14px", marginBottom:"16px", background:"#00FF4105" }}>
+                    <div style={{ fontSize:"10px", color: acDim(), letterSpacing:"0.05em", lineHeight:"1.8" }}>
+                      {">"} ENERGY CORRELATION:<br/>
+                      {">"} Energy ON: {energyRate}% win rate ({energyGreen}/{energyTotal})<br/>
+                      {">"} Energy OFF: {noEnergyRate}% win rate ({noEnergyGreen}/{noEnergyTotal})
+                    </div>
+                  </div>
+                );
+              })()}
+              {/* Weekly sparkline */}
+              {weeklyData.some(v => v >= 0) && (
+                <div style={{ marginBottom:"16px" }}>
+                  <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"8px" }}>// WEEKLY WIN RATE — LAST 4 WEEKS</div>
+                  <div style={{ display:"flex", gap:"6px", alignItems:"flex-end", height:"50px", padding:"4px 0" }}>
+                    {weeklyData.map((pct, i) => {
+                      const h = pct >= 0 ? Math.max(4, (pct / 100) * 44) : 0;
+                      return (
+                        <div key={i} style={{ flex:1, display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"flex-end", height:"100%" }}>
+                          <div style={{
+                            width:"100%", height:`${h}px`,
+                            background: pct >= 70 ? ac() : pct >= 50 ? "#FFD700" : pct >= 0 ? "#FF0000" : "#1a1a1a",
+                            opacity: pct >= 0 ? 0.8 : 0.3,
+                            transition:"height 0.5s",
+                            boxShadow: pct >= 0 ? `0 0 6px ${pct >= 70 ? ac() : pct >= 50 ? "#FFD700" : "#FF0000"}44` : "none",
+                          }} />
+                          <div style={{ fontSize:"7px", color:"#444", marginTop:"4px", letterSpacing:"0.05em" }}>W{i+1}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              <div className="stat-grid-mobile">
               {[
-                { label:"Total Days Filed", value: totalDays, color:"#00FF41" },
-                { label:"Green Days", value: greenDays, color:"#00FF41" },
+                { label:"Total Days Filed", value: totalDays, color: ac() },
+                { label:"Green Days", value: greenDays, color: ac() },
                 { label:"Red Days", value: redDays, color:"#FF0000" },
-                { label:"Win Rate", value: `${winRate}%`, color: winRate >= 70 ? "#00FF41" : winRate >= 50 ? "#FFD700" : "#FF0000" },
-                { label:"Current Streak", value: state.streak, color:"#00FF41" },
+                { label:"Energy Days", value: `${energyDays}/${totalDays}`, color: ac() },
+                { label:"Win Rate", value: `${winRate}%`, color: winRate >= 70 ? ac() : winRate >= 50 ? "#FFD700" : "#FF0000" },
+                { label:"Commander XP", value: state.xp||0, color: ac() },
+                { label:"Current Streak", value: state.streak, color: ac() },
+                { label:"Streak Freezes", value: state.freezes||0, color:"#FFD700" },
                 { label:"Longest Streak", value: longest, color:"#FFD700" },
               ].map(({label, value, color}) => (
                 <div key={label} style={{
@@ -654,20 +1344,34 @@
                   <div style={{ fontSize:"18px", color, fontWeight:700, textShadow:`0 0 8px ${color}44` }}>{value}</div>
                 </div>
               ))}
+              </div>
 
-              {/* Heatmap */}
+              {/* Monthly calendar */}
               <div style={{ marginTop:"24px" }}>
-                <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"10px" }}>// 35-DAY HEATMAP</div>
-                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"3px" }}>
-                  {heatmapDays.map(({dateStr, log}) => {
-                    const col = !log ? "#111" : log.alterEgo ? "#FF000044" : "#00FF4144";
-                    const border = !log ? "#1a1a1a" : log.alterEgo ? "#FF000088" : "#00FF4188";
+                <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"10px" }}>// {monthName}</div>
+                <div style={{ display:"grid", gridTemplateColumns:"repeat(7,1fr)", gap:"2px" }}>
+                  {dayHeaders.map(d => (
+                    <div key={d} style={{ fontSize:"7px", color:"#333", textAlign:"center", padding:"2px 0", letterSpacing:"0.05em" }}>{d}</div>
+                  ))}
+                  {Array.from({length: firstDayOfWeek}).map((_, i) => (
+                    <div key={`pad-${i}`} />
+                  ))}
+                  {calendarDays.map(({day, dateStr, log}) => {
+                    const isToday = dateStr === today();
+                    const col = !log ? "#111" : log.alterEgo ? "#FF000044" : ac() + "44";
+                    const border = !log ? "#1a1a1a" : log.alterEgo ? "#FF000088" : ac() + "88";
                     return (
-                      <div key={dateStr} title={dateStr} style={{
-                        height:"28px", background:col,
-                        border:`1px solid ${border}`,
-                        boxShadow: log ? `0 0 4px ${border}` : "none",
-                      }} />
+                      <div key={dateStr}
+                        title={log ? `${dateStr}: ${log.alterEgo ? "RED DAY" : "GREEN DAY"}${log.improvement ? ` — ${log.improvement}` : ""}` : `${dateStr}: MISSED`}
+                        style={{
+                          padding:"6px 0", textAlign:"center", fontSize:"10px",
+                          background: col, border:`1px solid ${border}`,
+                          boxShadow: log ? `0 0 4px ${border}` : isToday ? "0 0 4px #00FF4144" : "none",
+                          color: log ? (log.alterEgo ? "#FF0000" : ac()) : isToday ? "#444" : "#222",
+                          fontWeight: isToday ? 700 : 400,
+                          cursor:"default",
+                        }}
+                      >{day}</div>
                     );
                   })}
                 </div>
@@ -686,6 +1390,148 @@
                   </div>
                 </div>
               </div>
+
+              {/* Partner comparison */}
+              {state.partnerName && (
+                <div style={{ marginTop:"24px", border:"1px solid #1a1a1a", padding:"14px" }}>
+                  <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"10px" }}>// VS {state.partnerName.toUpperCase()}</div>
+                  <div style={{ display:"flex", justifyContent:"space-around", gap:"12px" }}>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:"8px", color:"#555", marginBottom:"4px" }}>YOU</div>
+                      <div style={{ fontSize:"22px", color: ac() }}>{state.streak}</div>
+                      <div style={{ fontSize:"8px", color:"#555" }}>streak</div>
+                    </div>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:"8px", color:"#555", marginBottom:"4px" }}>{state.partnerName.toUpperCase()}</div>
+                      <div style={{ fontSize:"22px", color:"#FFD700" }}>{state.partnerStreak||0}</div>
+                      <div style={{ fontSize:"8px", color:"#555" }}>streak</div>
+                    </div>
+                    <div style={{ textAlign:"center" }}>
+                      <div style={{ fontSize:"8px", color:"#555", marginBottom:"4px" }}>GAP</div>
+                      <div style={{ fontSize:"22px", color: (state.streak||0) >= (state.partnerStreak||0) ? ac() : "#FF0000" }}>
+                        {Math.abs((state.streak||0) - (state.partnerStreak||0))}
+                      </div>
+                      <div style={{ fontSize:"8px", color:"#555" }}>days</div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* ── SETTINGS TAB ── */}
+          {tab === "settings" && (
+            <div>
+              <div style={{ fontSize:"10px", color:"#555", letterSpacing:"0.1em", marginBottom:"16px" }}>// SYSTEM SETTINGS</div>
+
+              <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#888", marginBottom:"12px" }}>// THEME</div>
+                <div style={{ display:"flex", gap:"6px", flexWrap:"wrap" }}>
+                  {Object.entries(THEMES).map(([key, t]) => (
+                    <button key={key} onClick={() => { onApplyTheme?.(key); }} style={{
+                      width:"32px", height:"32px", border:`2px solid ${getTheme().accent === t.accent ? t.accent : "#222"}`,
+                      background: t.accent + "22", cursor:"pointer", display:"flex", alignItems:"center", justifyContent:"center",
+                      boxShadow: getTheme().accent === t.accent ? `0 0 8px ${t.accent}66` : "none",
+                      transition:"all 0.2s",
+                    }}>
+                      <div style={{ width:"16px", height:"16px", background: t.accent, borderRadius:"50%" }} />
+                    </button>
+                  ))}
+                </div>
+                <div style={{ fontSize:"9px", color:"#666", marginTop:"8px" }}>{">"} Current: {getTheme().name}</div>
+              </div>
+
+              <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#888", marginBottom:"12px" }}>// AUDIO</div>
+                <div onClick={() => { onToggleSound(); addToast?.(soundOn ? "Sound muted" : "Sound enabled", "info"); }} style={{
+                  display:"flex", alignItems:"center", justifyContent:"space-between", cursor:"pointer", padding:"8px 0",
+                }}>
+                  <span style={{ fontSize:"11px", color:"#aaa", letterSpacing:"0.05em" }}>Sound Effects</span>
+                  <div style={{
+                    width:"36px", height:"20px", border:`1px solid ${soundOn ? ac() : "#2a2a2a"}`,
+                    background: soundOn ? acBg() : "transparent", display:"flex", alignItems:"center",
+                    justifyContent: soundOn ? "flex-end" : "flex-start", padding:"2px", transition:"all 0.2s",
+                  }}>
+                    <div style={{ width:"14px", height:"14px", background: soundOn ? ac() : "#2a2a2a", transition:"all 0.2s" }} />
+                  </div>
+                </div>
+              </div>
+
+              <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#888", marginBottom:"12px" }}>// NOTIFICATIONS</div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"8px 0" }}>
+                  <span style={{ fontSize:"11px", color:"#aaa", letterSpacing:"0.05em" }}>Daily Reminder</span>
+                  <input type="time" defaultValue={getReminderTime() || "21:00"} onChange={e => setReminderTime(e.target.value)}
+                    style={{ background:"#000", border:"1px solid #1a1a1a", color: ac(), fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"11px", padding:"4px 8px", outline:"none" }}
+                  />
+                </div>
+                <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", padding:"4px 0" }}>
+                  <span style={{ fontSize:"10px", color:"#666", letterSpacing:"0.05em" }}>Browser Notifications</span>
+                  <button onClick={() => { const ok = requestNotifPermission(); addToast?.(ok ? "Notifications enabled" : "Permission requested", ok ? "info" : "info"); }}
+                    style={{ background:"transparent", border:"1px solid #1a1a1a", color:"#aaa", fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px", padding:"4px 10px", cursor:"pointer" }}>
+                    {notifEnabled() ? "ENABLED" : "REQUEST"}
+                  </button>
+                </div>
+              </div>
+
+              <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#888", marginBottom:"12px" }}>// ACCOUNTABILITY PARTNER</div>
+                <div style={{ marginBottom:"8px" }}>
+                  <div style={{ fontSize:"9px", color:"#666", marginBottom:"4px" }}>{">"} PARTNER NAME:</div>
+                  <input type="text" value={state.partnerName||""} onChange={e => onUpdate({...state, partnerName:e.target.value})} placeholder="> Enter name..." maxLength={30}
+                    style={{ width:"100%", background:"#000", border:"1px solid #1a1a1a", color: ac(), fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"11px", padding:"8px", outline:"none" }}
+                  />
+                </div>
+                <div>
+                  <div style={{ fontSize:"9px", color:"#666", marginBottom:"4px" }}>{">"} PARTNER STREAK:</div>
+                  <input type="number" value={state.partnerStreak||0} onChange={e => onUpdate({...state, partnerStreak:Math.max(0,parseInt(e.target.value)||0)})} min="0"
+                    style={{ width:"60px", background:"#000", border:"1px solid #1a1a1a", color: ac(), fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"11px", padding:"8px", outline:"none" }}
+                  />
+                </div>
+              </div>
+
+              <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#888", marginBottom:"12px" }}>// WEBHOOK</div>
+                <div style={{ fontSize:"9px", color:"#666", marginBottom:"6px" }}>{">"} Webhook URL (called on submit):</div>
+                <input type="url" value={state.webhookUrl||""} onChange={e => onUpdate({...state, webhookUrl:e.target.value})} placeholder="https://hooks.example.com/commander"
+                  style={{ width:"100%", background:"#000", border:"1px solid #1a1a1a", color: ac(), fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"10px", padding:"8px", outline:"none", marginBottom:"6px" }}
+                />
+                <button onClick={() => { navigator.clipboard?.writeText(JSON.stringify({event:"test",name:state.name,codename:state.codename,streak:state.streak})); addToast?.("Test payload copied", "info"); }}
+                  style={{ background:"transparent", border:"1px solid #1a1a1a", color:"#888", fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"9px", padding:"4px 10px", cursor:"pointer", marginTop:"4px" }}
+                >COPY TEST PAYLOAD</button>
+              </div>
+
+              <div style={{ border:"1px solid #1a1a1a", padding:"14px", marginBottom:"16px" }}>
+                <div style={{ fontSize:"11px", color:"#888", marginBottom:"12px" }}>// DATA</div>
+                <Btn onClick={() => { onExport(); addToast?.("Logs exported", "info"); }} variant="primary">Export Logs (JSON)</Btn>
+                <div style={{ marginTop:"8px" }}>
+                  <div style={{ fontSize:"9px", color:"#666", marginBottom:"6px" }}>{">"} RESTORE FROM BACKUP:</div>
+                  <input type="file" accept=".json" id="restoreInput" style={{ display:"none" }} onChange={e => {
+                    const file = e.target.files?.[0]; if (!file) return;
+                    const reader = new FileReader();
+                    reader.onload = (ev) => {
+                      try {
+                        const data = JSON.parse(ev.target.result);
+                        if (!data.logs) { addToast?.("Invalid backup file", "error"); return; }
+                        const restored = { ...MockDB.defaultState(), ...data };
+                        MockDB.setState(restored);
+                        window.location.reload();
+                      } catch { addToast?.("Invalid backup file", "error"); }
+                    };
+                    reader.readAsText(file);
+                    e.target.value = "";
+                  }} />
+                  <label htmlFor="restoreInput" style={{
+                    display:"inline-block", border:"1px solid #FFD70044", color:"#FFD700", fontFamily:"'JetBrains Mono','Courier New',monospace",
+                    fontSize:"10px", padding:"8px 16px", cursor:"pointer", letterSpacing:"0.1em", marginTop:"4px",
+                  }}>Choose File & Restore</label>
+                </div>
+              </div>
+
+              <div style={{ border:"1px solid #FF000022", padding:"14px" }}>
+                <div style={{ fontSize:"11px", color:"#FF000088", marginBottom:"12px" }}>// DANGER ZONE</div>
+                <Btn onClick={onReset} variant="danger">Factory Reset — Erase All Data</Btn>
+              </div>
             </div>
           )}
 
@@ -696,30 +1542,79 @@
                 // PAST 1% IMPROVEMENTS — {logs.length} ENTRIES
               </div>
               {logs.length === 0 ? (
-                <div style={{ fontSize:"11px", color:"#333", textAlign:"center", padding:"30px 0" }}>
-                  {">"} No entries yet, Commander.
+                <div style={{ textAlign:"center", padding:"30px 0" }}>
+                  <pre style={{ color:"#1a1a1a", fontSize:"7px", lineHeight:"1.3", marginBottom:"16px" }}>
+{`  ┌─────────────────────┐
+  │                     │
+  │  NO LOGS ON FILE    │
+  │                     │
+  │  Your discipline    │
+  │  starts with day 1. │
+  │                     │
+  └─────────────────────┘`}
+                  </pre>
+                  <div style={{ fontSize:"11px", color:"#333", letterSpacing:"0.05em" }}>{">"} Submit your first audit above.</div>
                 </div>
               ) : (
-                <div style={{ maxHeight:"400px", overflowY:"auto" }}>
-                  {[...logs].reverse().map((log, i) => (
+                <div className="history-scroll" style={{ maxHeight:"400px", overflowY:"auto" }}>
+                  {[...logs].reverse().map((log, i) => {
+                    const actualIndex = logs.length - 1 - i;
+                    const isEditing = editingIndex === actualIndex;
+                    return (
                     <div key={i} style={{
-                      borderLeft:`3px solid ${log.alterEgo ? "#FF0000" : "#00FF41"}`,
+                      borderLeft:`3px solid ${log.alterEgo ? "#FF0000" : ac()}`,
                       padding:"12px 14px", marginBottom:"10px",
-                      background: log.alterEgo ? "#FF000008" : "#00FF4108",
-                      border:`1px solid ${log.alterEgo ? "#FF000022" : "#00FF4122"}`,
-                      borderLeft:`3px solid ${log.alterEgo ? "#FF0000" : "#00FF41"}`,
+                      background: log.alterEgo ? "#FF000008" : acBg(),
+                      border:`1px solid ${log.alterEgo ? "#FF000022" : ac()+"22"}`,
+                      borderLeft:`3px solid ${log.alterEgo ? "#FF0000" : ac()}`,
                     }}>
                       <div style={{ display:"flex", justifyContent:"space-between", marginBottom:"6px" }}>
-                        <div style={{ fontSize:"10px", color: log.alterEgo ? "#FF000088" : "#00FF4188", letterSpacing:"0.1em" }}>
-                          {log.alterEgo ? "// RED DAY" : "// GREEN DAY"}
+                        <div style={{ fontSize:"10px", color: log.alterEgo ? "#FF000088" : acDim(), letterSpacing:"0.1em" }}>
+                          {log.alterEgo ? "// RED DAY" : `// GREEN DAY${log.energy ? " [ENERGY]" : ""}`}{log.tag ? ` <${log.tag.toUpperCase()}>` : ""}
                         </div>
-                        <div style={{ fontSize:"9px", color:"#444" }}>{log.date}</div>
+                        <div style={{ display:"flex", gap:"8px", alignItems:"center" }}>
+                          {!isEditing && (
+                            <>
+                              <button onClick={() => { setEditingIndex(actualIndex); setEditValue(log.improvement); }} title="Edit" style={{ background:"none", border:"none", cursor:"pointer", color:"#556", padding:"0", display:"flex", alignItems:"center" }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+                              </button>
+                              <button onClick={() => handleDeleteLog(actualIndex)} title="Delete" style={{ background:"none", border:"none", cursor:"pointer", color:"#FF000066", padding:"0", display:"flex", alignItems:"center" }}>
+                                <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>
+                              </button>
+                            </>
+                          )}
+                          <div style={{ fontSize:"9px", color:"#444" }}>{log.date}</div>
+                        </div>
                       </div>
                       <div style={{ fontSize:"12px", color:"#bbb", lineHeight:"1.6" }}>
-                        {log.improvement}
+                        {isEditing ? (
+                          <div>
+                            <textarea value={editValue} onChange={e=>setEditValue(e.target.value)}
+                              style={{
+                                width:"100%", minHeight:"60px", background:"#000", border:`1px solid ${ac()}`,
+                                color: ac(), fontFamily:"'JetBrains Mono','Courier New',monospace",
+                                fontSize:"12px", padding:"10px", resize:"none",
+                                outline:"none", caretColor: ac(), lineHeight:"1.6",
+                              }}
+                            />
+                            <div style={{ display:"flex", gap:"8px", marginTop:"8px" }}>
+                              <button onClick={() => handleEditLog(actualIndex)} style={{
+              background:"transparent", border:"1px solid #00FF41", color:"#00FF41",
+                                fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"10px",
+                                padding:"6px 14px", cursor:"pointer", letterSpacing:"0.1em",
+                              }}>Save</button>
+                              <button onClick={() => setEditingIndex(null)} style={{
+                                background:"transparent", border:"1px solid #444", color:"#888",
+                                fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"10px",
+                                padding:"6px 14px", cursor:"pointer", letterSpacing:"0.1em",
+                              }}>Cancel</button>
+                            </div>
+                          </div>
+                        ) : (log.improvement || <span style={{color:"#333", fontStyle:"italic"}}>No directive filed</span>)}
                       </div>
                     </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </div>
@@ -763,7 +1658,7 @@
               {">"} IDENTITY CONFIRMED<br/>
               {">"} INITIALIZING MISSION...<br/>
               {">"} WELCOME, {codename.toUpperCase()}<br/>
-              {">"} SET SAIL. 🦅
+              {">"} SET SAIL.
             </div>
           </div>
         );
@@ -784,39 +1679,95 @@
           {/* Name */}
           <div style={{ marginBottom:"20px" }}>
             <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.1em" }}>{">"} YOUR NAME:</div>
-            <input
-              type="text"
-              value={name}
-              onChange={e => setName(e.target.value)}
-              placeholder="> e.g. Farman"
-              maxLength={30}
-              onFocus={e => e.target.style.borderColor="#00FF41"}
-              onBlur={e => e.target.style.borderColor="#1a1a1a"}
-              style={inputStyle}
-            />
+            <div className="input-group">
+              <input
+                type="text"
+                value={name}
+                onChange={e => setName(e.target.value)}
+                placeholder="> e.g. Farman"
+                maxLength={30}
+                onFocus={e => e.target.style.borderColor="#00FF41"}
+                onBlur={e => e.target.style.borderColor="#1a1a1a"}
+                style={inputStyle}
+              /><span className="cursor" />
+            </div>
           </div>
 
           {/* Codename */}
           <div style={{ marginBottom:"28px" }}>
             <div style={{ fontSize:"10px", color:"#aaa", letterSpacing:"0.1em" }}>{">"} YOUR CODENAME:</div>
-            <input
-              type="text"
-              value={codename}
-              onChange={e => setCodename(e.target.value)}
-              placeholder="> e.g. Falcon"
-              maxLength={20}
-              onFocus={e => e.target.style.borderColor="#00FF41"}
-              onBlur={e => e.target.style.borderColor="#1a1a1a"}
-              style={inputStyle}
-            />
+            <div className="input-group">
+              <input
+                type="text"
+                value={codename}
+                onChange={e => setCodename(e.target.value)}
+                placeholder="> e.g. Falcon"
+                maxLength={20}
+                onFocus={e => e.target.style.borderColor="#00FF41"}
+                onBlur={e => e.target.style.borderColor="#1a1a1a"}
+                style={inputStyle}
+              /><span className="cursor" />
+            </div>
             <div style={{ fontSize:"9px", color:"#333", marginTop:"6px", letterSpacing:"0.05em" }}>
               {">"} This is your call sign. Choose wisely.
             </div>
           </div>
 
           <Btn onClick={handleLaunch} disabled={!name.trim() || !codename.trim()}>
-            Initialize System — Set Sail 🦅
+            Initialize System — Set Sail
           </Btn>
+        </div>
+      );
+    }
+
+    // ============================================================
+    // COMMAND PALETTE
+    // ============================================================
+    function CommandPalette({ open, onClose, onAction, state }) {
+      const [query, setQuery] = useState("");
+      const inputRef = useRef(null);
+      useEffect(() => { if (open) { setQuery(""); setTimeout(() => inputRef.current?.focus(), 50); } }, [open]);
+      if (!open) return null;
+      const actions = [
+        { id:"home", label:"Go to Home", keys:"⌘K" },
+        { id:"report", label:"Open Report", keys:"⌘K" },
+        { id:"stats", label:"Open Stats", keys:"⌘K" },
+        { id:"history", label:"Open History", keys:"⌘K" },
+        { id:"settings", label:"Open Settings", keys:"⌘K" },
+        { id:"undo", label:"Undo Last Submission", keys:"⌘Z" },
+        { id:"timer", label:"Toggle Session Timer", keys:"" },
+        { id:"challenge", label:"Claim Daily Challenge", keys:"" },
+        { id:"share", label:"Copy Share Card", keys:"" },
+        { id:"export", label:"Export Logs", keys:"" },
+      ];
+      const filtered = query ? actions.filter(a => a.label.toLowerCase().includes(query.toLowerCase())) : actions;
+      return (
+        <div onClick={onClose} style={{ position:"fixed", inset:0, zIndex:9999, background:"rgba(0,0,0,0.85)", display:"flex", alignItems:"flex-start", justifyContent:"center", paddingTop:"12vh" }}>
+          <div onClick={e => e.stopPropagation()} style={{ width:"420px", maxWidth:"90vw", border:"1px solid #2a2a2a", background:"#0a0a0a", boxShadow:"0 8px 40px rgba(0,0,0,0.8)" }}>
+            <div style={{ padding:"12px 14px", borderBottom:"1px solid #1a1a1a" }}>
+              <div className="input-group" style={{ display:"flex", alignItems:"center" }}>
+                <span style={{ color:"#555", fontSize:"11px", marginRight:"8px" }}>{">"}</span>
+                <input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)} placeholder="Type a command..." onKeyDown={e => { if (e.key==='Escape') onClose(); }}
+                  style={{ width:"100%", background:"transparent", border:"none", color: getTheme().accent, fontFamily:"'JetBrains Mono','Courier New',monospace", fontSize:"12px", outline:"none", caretColor: getTheme().accent }}
+                /><span className="cursor" />
+              </div>
+            </div>
+            <div style={{ maxHeight:"280px", overflowY:"auto" }}>
+              {filtered.map(a => (
+                <div key={a.id} onClick={() => { onAction(a.id); onClose(); }} style={{
+                  padding:"9px 14px", cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center",
+                  borderBottom:"1px solid #0d0d0d", transition:"background 0.15s",
+                }} onMouseEnter={e=>e.currentTarget.style.background="#00FF4108"} onMouseLeave={e=>e.currentTarget.style.background="transparent"}>
+                  <span style={{ fontSize:"11px", color:"#ccc", letterSpacing:"0.05em" }}>{a.label}</span>
+                  {a.keys && <span style={{ fontSize:"8px", color:"#555" }}>{a.keys}</span>}
+                </div>
+              ))}
+              {filtered.length === 0 && <div style={{ padding:"14px", fontSize:"10px", color:"#444", textAlign:"center" }}>No commands match</div>}
+            </div>
+            <div style={{ padding:"8px 14px", borderTop:"1px solid #1a1a1a", fontSize:"7px", color:"#333", letterSpacing:"0.1em" }}>
+              ESC TO CLOSE &middot; CTRL+K TO TOGGLE
+            </div>
+          </div>
         </div>
       );
     }
@@ -827,6 +1778,22 @@
     function App() {
       const [appState, setAppState] = useState(null);
       const [screen, setScreen] = useState("loading");
+      const [missedDays, setMissedDays] = useState(0);
+      const [resetting, setResetting] = useState(false);
+      const [soundOn, setSoundOn] = useState(soundEnabled());
+      const [toasts, setToasts] = useState([]);
+      const [lastSubmitSnapshot, setLastSubmitSnapshot] = useState(null);
+      const [timerOpen, setTimerOpen] = useState(false);
+      const [paletteOpen, setPaletteOpen] = useState(false);
+      const [paletteQuery, setPaletteQuery] = useState("");
+
+      const addToast = (message, variant = "info") => {
+        const id = ++toastId;
+        setToasts(prev => [...prev, { id, message, variant }]);
+        setTimeout(() => setToasts(prev => prev.filter(t => t.id !== id)), 3500);
+      };
+
+      const applyTheme = (name) => { setTheme(name); addToast(`Theme saved. Reloading...`, "info"); setTimeout(() => window.location.reload(), 300); };
 
       useEffect(() => {
         const init = async () => {
@@ -834,29 +1801,88 @@
           const t = today(), y = yesterday();
           if (!raw.name) { setAppState(raw); setScreen("init"); return; }
           if (raw.lastSubmitDate === t) { setAppState(raw); setScreen("filed"); return; }
-          if (raw.lastSubmitDate && raw.lastSubmitDate !== y && raw.lastSubmitDate !== t) { setAppState(raw); setScreen("breach"); return; }
+          if (raw.lastSubmitDate && raw.lastSubmitDate !== y && raw.lastSubmitDate !== t) {
+      const lastDate = new Date(raw.lastSubmitDate + 'T00:00:00');
+      const todayDate = new Date(t + 'T00:00:00');
+      setMissedDays(Math.max(1, Math.round((todayDate - lastDate) / 86400000) - 1));
+      setAppState(raw); setScreen("breach"); return;
+    }
           setAppState(raw); setScreen("checklist");
         };
         init();
+        initReminderChecker();
+        const handleKey = (e) => {
+          if ((e.ctrlKey || e.metaKey) && e.key === 'k') { e.preventDefault(); setPaletteOpen(p => !p); }
+          if (e.key === 'Escape') setPaletteOpen(false);
+        };
+        document.addEventListener('keydown', handleKey);
+        return () => document.removeEventListener('keydown', handleKey);
       }, []);
 
       const handleInit = (name, codename) => {
         const u = {...appState, name, codename};
         MockDB.setState(u); setAppState(u); setScreen("checklist");
+        addToast("System initialized, Commander", "info");
       };
 
       const handleBreachResolve = (res) => {
         const u = {...appState};
-        if (res==="reset") u.streak = 0;
+        if (res==="reset") { u.streak = 0; addToast("Streak reset to 0", "error"); }
+        else if (res==="freeze") { u.freezes = Math.max(0, (u.freezes||0) - 1); addToast("Streak freeze used", "info"); }
+        else addToast("Streak preserved", "info");
         setAppState(u); MockDB.setState(u); setScreen("checklist");
       };
 
-      const handleSubmit = ({energy,alterEgo,improvement}) => {
+      const handleExport = () => {
+        if (!appState?.logs?.length) return;
+        const blob = new Blob([JSON.stringify({ logs: appState.logs, streak: appState.streak, name: appState.name, codename: appState.codename, exportedAt: new Date().toISOString() }, null, 2)], { type:'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url; a.download = `commander-logs-${new Date().toISOString().slice(0,10)}.json`; a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      const fireWebhook = (event, data) => {
+        const url = appState?.webhookUrl;
+        if (!url) return;
+        try { fetch(url, { method:"POST", mode:"no-cors", headers:{"Content-Type":"application/json"}, body:JSON.stringify({event,...data,timestamp:new Date().toISOString()}) }); } catch {}
+      };
+
+      const handleSubmit = ({energy,alterEgo,improvement,tag}) => {
+        setLastSubmitSnapshot(JSON.parse(JSON.stringify(appState)));
         const u = {...appState};
         u.lastSubmitDate = today();
+        const wasGreen = !alterEgo;
         u.streak = alterEgo ? 0 : (u.streak||0)+1;
-        u.logs = [...(u.logs||[]), {date:today(),energy,alterEgo,improvement}];
+        if (wasGreen && [7,14,30,60,90].includes(u.streak)) u.freezes = (u.freezes||0) + 1;
+        u.xp = (u.xp||0) + (alterEgo ? XP_PER_RED : XP_PER_GREEN);
+        if (wasGreen && [7,14,30,60,90].includes(u.streak)) u.xp += XP_MILESTONE_BONUS;
+        u.logs = [...(u.logs||[]), {date:today(),energy,alterEgo,improvement,tag:tag||""}];
         MockDB.setState(u); setAppState(u); setScreen("filed");
+        addToast(alterEgo ? "Red day logged — streak reset" : "Green day logged", alterEgo ? "error" : "info");
+        fireWebhook("submission", {name:u.name,codename:u.codename,streak:u.streak,xp:u.xp,result:alterEgo?"red":"green",improvement});
+      };
+
+      const handleUndo = () => {
+        if (!lastSubmitSnapshot) return;
+        MockDB.setState(lastSubmitSnapshot);
+        setAppState(lastSubmitSnapshot);
+        setScreen("checklist");
+        setLastSubmitSnapshot(null);
+        addToast("Last submission undone", "info");
+      };
+
+      const handleUpdateLogs = (newState) => {
+        MockDB.setState(newState);
+        setAppState(newState);
+      };
+
+      const handleReset = () => {
+        try { localStorage.removeItem(LS_KEY); } catch {}
+        setAppState(MockDB.defaultState());
+        setScreen("init");
+        setResetting(false);
+        addToast("All data erased", "error");
       };
 
       const name = appState?.name || "Commander";
@@ -865,9 +1891,38 @@
       const renderScreen = () => {
         if (screen==="loading"||!appState) return <div style={{textAlign:"center",padding:"40px",fontSize:"11px",color:"#666"}}>{">"} INITIALIZING SYSTEM...</div>;
         if (screen==="init") return <InitScreen onComplete={handleInit} />;
-        if (screen==="breach") return <BreachScreen onResolve={handleBreachResolve} />;
-        if (screen==="checklist") return <ChecklistForm state={appState} name={name} codename={codename} onSubmit={handleSubmit} />;
-        if (screen==="filed") return <AlreadyFiledScreen state={appState} name={name} codename={codename} />;
+        if (screen==="breach") return <BreachScreen onResolve={handleBreachResolve} missedDays={missedDays} freezes={appState?.freezes||0} />;
+        if (screen==="checklist") return <ChecklistForm state={appState} name={name} codename={codename} onSubmit={handleSubmit} timerOpen={timerOpen} onToggleTimer={() => setTimerOpen(!timerOpen)} />;
+        if (screen==="filed") return <AlreadyFiledScreen state={appState} name={name} codename={codename} onUpdate={handleUpdateLogs} addToast={addToast} soundOn={soundOn} onToggleSound={() => { const n = toggleSound(); setSoundOn(n); }} onExport={handleExport} onReset={() => setResetting(true)} onUndo={handleUndo} timerOpen={timerOpen} onToggleTimer={() => setTimerOpen(!timerOpen)} onApplyTheme={applyTheme} />;
+      };
+
+      const handlePaletteAction = (actionId) => {
+        if (screen==="filed") {
+          if (actionId==="undo" && handleUndo) { handleUndo(); return; }
+          if (actionId==="share") {
+            const shareText = `═══ COMMANDER'S CHECKLIST ═══\nName: ${name} (${codename})\nStreak: ${appState?.streak||0} days\nTotal: ${appState?.logs?.length||0} audits\nWin Rate: ${appState?.logs?.length > 0 ? Math.round(appState.logs.filter(l=>!l.alterEgo).length/appState.logs.length*100) : 0}%\nXP: ${appState?.xp||0}\n═══ ${new Date().toLocaleDateString("en-US",{month:"short",day:"numeric",year:"numeric"})} ═══`;
+            navigator.clipboard?.writeText(shareText).then(() => addToast?.("Share card copied", "info")).catch(() => {});
+            return;
+          }
+        }
+        if (actionId==="export") { handleExport(); return; }
+        if (actionId==="timer") { setTimerOpen(!timerOpen); return; }
+        if (actionId==="challenge" && screen==="filed") {
+          if (appState?.challenges?.[today()]) { addToast?.("Already claimed today", "info"); return; }
+          const C = [
+            { text:"Complete audit before 09:00", xp:20 }, { text:"Write a 50+ character journal entry", xp:15 },
+            { text:"Score 100% energy on today's audit", xp:10 }, { text:"Mark a tag on today's entry", xp:10 },
+            { text:"Log in before 12:00", xp:15 }, { text:"Achieve a 3-day streak", xp:25 },
+            { text:"No red days this week", xp:30 }, { text:"Complete 5 audits this week", xp:20 },
+            { text:"Write improvement for 3 consecutive days", xp:20 }, { text:"Use streak freeze wisely", xp:15 },
+          ];
+          const idx = (name?.length||0) + new Date().getDate() + new Date().getMonth();
+          const c = C[idx % C.length];
+          const u = {...appState, challenges:{...(appState?.challenges||{}), [today()]:true}, xp:(appState?.xp||0)+c.xp};
+          MockDB.setState(u); setAppState(u);
+          addToast?.(`Challenge complete! +${c.xp} XP`, "info");
+          return;
+        }
       };
 
       const dateStr = new Date().toLocaleDateString("en-US",{weekday:"long",year:"numeric",month:"long",day:"numeric"}).toUpperCase();
@@ -875,8 +1930,9 @@
       return (
         <>
           <CRTOverlay />
-          <div style={{ minHeight:"100vh", background:"#000", display:"flex", justifyContent:"center", padding:"24px 16px" }}>
-            <div style={{ width:"100%", maxWidth:"480px" }}>
+          <ToastContainer toasts={toasts} onDismiss={()=>{}} />
+          <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} onAction={handlePaletteAction} state={appState} />
+          <div className="app-container">
 
               {/* Header */}
               <div style={{ marginBottom:"8px" }}>
@@ -884,6 +1940,21 @@
                   {">"} FALCON'S HUNT — CLASSIFIED SYSTEM v1.0
                   {appState?.codename ? ` — ${appState.codename.toUpperCase()}` : ""}
                   <span id="syncDot" title="OFFLINE" style={{ width:"7px", height:"7px", borderRadius:"50%", background:"#333", display:"inline-block", flexShrink:0, transition:"background 0.4s" }} />
+                  <button onClick={handleExport} title="Export logs" style={{ background:"none", border:"none", cursor:"pointer", padding:"0", display:"flex", alignItems:"center", color:"#556" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
+                  </button>
+                  <button onClick={() => setResetting(true)} title="Reset system" style={{ background:"none", border:"none", cursor:"pointer", padding:"0", display:"flex", alignItems:"center", color:"#FF000066" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M23 4v6h-6"/><path d="M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>
+                  </button>
+                  <button onClick={() => setPaletteOpen(true)} title="Command palette (Ctrl+K)" style={{ background:"none", border:"none", cursor:"pointer", padding:"0", display:"flex", alignItems:"center", color:"#556" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/></svg>
+                  </button>
+                  <button onClick={() => { const next = toggleSound(); setSoundOn(next); }} title={soundOn ? "Mute sounds" : "Enable sounds"} style={{ background:"none", border:"none", cursor:"pointer", padding:"0", display:"flex", alignItems:"center", color: soundOn ? "#00FF4188" : "#333" }}>
+                    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+                      <path d="M11 5L6 9H2v6h4l5 4V5z"/>
+                      {soundOn ? <><line x1="23" y1="9" x2="17" y2="15"/><line x1="17" y1="9" x2="23" y2="15"/></> : <line x1="20" y1="9" x2="14" y2="15"/>}
+                    </svg>
+                  </button>
                 </div>
                 <GlitchHeader />
                 <div style={{ fontSize:"10px", color:"#556", letterSpacing:"0.1em", marginTop:"5px" }}>
@@ -892,20 +1963,35 @@
               </div>
 
               {/* Divider */}
-              <div style={{ height:"1px", background:"linear-gradient(90deg,#00FF41,transparent)", margin:"16px 0 24px", boxShadow:"0 0 6px rgba(0,255,65,0.3)" }} />
+              <div style={{ height:"1px", background:"linear-gradient(90deg,var(--accent,#00FF41),transparent)", margin:"16px 0 24px" }} />
 
               {/* Screen */}
-              {renderScreen()}
+              {resetting ? (
+                <div className="fade-up" style={{ padding:"10px 0 30px" }}>
+                  <div style={{ fontSize:"11px", color:"#FF0000", letterSpacing:"0.15em", marginBottom:"16px", textShadow:"0 0 8px rgba(255,0,0,0.5)" }}>
+                    // FACTORY RESET
+                  </div>
+                  <div style={{ fontSize:"12px", color:"#aaa", lineHeight:"2", marginBottom:"20px" }}>
+                    {">"} This will permanently erase all logs,<br/>
+                    {">"} streak data, and commander identity.<br/>
+                    {">"} This action cannot be undone.
+                  </div>
+                  <Btn onClick={handleReset} variant="danger">Confirm Reset — Erase Everything</Btn>
+                  <Btn onClick={() => setResetting(false)} variant="primary">Cancel</Btn>
+                </div>
+              ) : <div className="fade-up" key={screen}>{renderScreen()}</div>}
 
               {/* Footer */}
               <div style={{ marginTop:"40px", borderTop:"1px solid #0a0a0a", paddingTop:"16px", fontSize:"9px", color:"#444", letterSpacing:"0.1em", textAlign:"center" }}>
                 // OPERATIONAL SECURITY ENABLED — ALL LOGS ENCRYPTED LOCALLY
               </div>
-            </div>
           </div>
         </>
       );
     }
+
+    // Initialize theme
+    setTheme(localStorage.getItem(THEME_KEY) || "cyber");
 
     ReactDOM.createRoot(document.getElementById("root")).render(<App />);
   </script>
