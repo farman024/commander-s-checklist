@@ -1,5 +1,9 @@
 # ⚡ The Commander's Checklist
 
+<p align="center">
+  <img src="logo.png" alt="Commander's Checklist" width="120"/>
+</p>
+
 > *"Discipline is doing what needs to be done, even when you don't want to."*
 
 A high-stakes daily accountability PWA for traders and builders. Built with a terminal/black-site aesthetic — because discipline deserves a war room, not a wellness app.
