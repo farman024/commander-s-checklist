@@ -387,13 +387,21 @@
         return () => clearInterval(iv);
       }, []);
       return (
-        <div className={active ? "glitch-active" : ""} style={{
-          fontSize:"clamp(18px,4.5vw,28px)", color:"#00FF41",
-          letterSpacing:"0.15em",
-          textShadow:"0 0 10px rgba(0,255,65,0.6)",
-          fontWeight:700,
-        }}>
-          THE COMMANDER'S CHECKLIST
+        <div style={{ display:"flex", flexDirection:"column", alignItems:"center", gap:"8px" }}>
+          <img src="logo.png" alt="Commander's Checklist" style={{
+            width:"clamp(120px,30vw,220px)", height:"auto",
+            filter: active ? "brightness(1.5) drop-shadow(0 0 8px #00FF41)" : "drop-shadow(0 0 4px rgba(0,255,65,0.4))",
+            transition:"all 0.15s",
+            imageRendering:"pixelated",
+          }} />
+          <div className={active ? "glitch-active" : ""} style={{
+            fontSize:"clamp(18px,4.5vw,28px)", color:"#00FF41",
+            letterSpacing:"0.15em",
+            textShadow:"0 0 10px rgba(0,255,65,0.6)",
+            fontWeight:700,
+          }}>
+            THE COMMANDER'S CHECKLIST
+          </div>
         </div>
       );
     }
